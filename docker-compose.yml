@@ -1,0 +1,35 @@
+# Use a modern Compose file version for compatibility with Docker Compose features
+version: '3.8'
+
+services:
+  redis:
+    # Redis is used by Celery as broker and backend for task queueing
+    # Alpine image keeps the container lightweight for local development
+    # Enterprise: use a hosted Redis service or a hardened production image with persistence and auth
+    image: redis:7-alpine
+    container_name: causal_redis
+    ports:
+      # Expose Redis on the host so the API worker can connect via localhost:6379
+      - "6379:6379"
+
+  postgres:
+    # PostgreSQL provides durable relational storage for future persistent data
+    # Alpine image keeps the database small and easy to run locally
+    # Enterprise: use managed Postgres (RDS/Azure Database/Cloud SQL) or a production-grade image with backups and monitoring
+    image: postgres:15-alpine
+    container_name: causal_postgres
+    environment:
+      # Database credentials for local development
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: enterprise_dw
+    ports:
+      # Expose Postgres to the host machine for local access and debugging
+      - "5432:5432"
+    volumes:
+      # Persist database data across restarts and container recreations
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  # Named volume for durable Postgres storage
+  pgdata:
