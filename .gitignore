@@ -1,0 +1,15 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Extracted data artifacts (CSV pulled by the SQL agent)
+data/*.csv
+
+# OS noise
+.DS_Store

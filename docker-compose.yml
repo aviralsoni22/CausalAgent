@@ -1,6 +1,3 @@
-# Use a modern Compose file version for compatibility with Docker Compose features
-version: '3.8'
-
 services:
   redis:
     # Redis is used by Celery as broker and backend for task queueing
@@ -29,6 +26,28 @@ services:
     volumes:
       # Persist database data across restarts and container recreations
       - pgdata:/var/lib/postgresql/data
+
+  r_sandbox:
+    # Isolated polyglot execution service. Runs untrusted, LLM-generated R code
+    # in a container with no database credentials and no access to the LLM.
+    # Enterprise: tighten further with a read-only rootfs, dropped capabilities,
+    # seccomp profile, and network egress restrictions before production.
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    container_name: causal_r_sandbox
+    environment:
+      SANDBOX_DATA_DIR: /sandbox/data
+      SANDBOX_WORKSPACE: /sandbox/workspace
+      SANDBOX_EXEC_TIMEOUT: "120"
+    ports:
+      # Expose the sandbox on 8001 for the orchestrator to POST scripts to
+      - "8001:8001"
+    volumes:
+      # Shared data volume: CSVs written by the SQL agent are mounted read-only
+      # here so the R script can read them. Read-only since the sandbox should
+      # never mutate source data.
+      - ./data:/sandbox/data:ro
 
 volumes:
   # Named volume for durable Postgres storage

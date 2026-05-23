@@ -1,0 +1,109 @@
+"""Seed the local Postgres data mart with synthetic e-commerce data.
+
+Creates the schema defined in ``app.core.schema_def`` and populates it with
+data that contains a *real*, recoverable treatment effect: orders that received
+a discount have a genuinely higher expected total_amount. This gives the
+SQL -> R -> evaluate pipeline something statistically meaningful to find.
+
+Run (with the Postgres container up and your venv active):
+
+    uv run python -m scripts.seed_db
+"""
+from __future__ import annotations
+
+import random
+from datetime import date, timedelta
+
+import pandas as pd
+from sqlalchemy import text
+
+from app.core.db import get_engine
+from app.core.schema_def import DDL
+
+N_CUSTOMERS = 3000
+TRUE_DISCOUNT_ATE = 14.0  # USD uplift in total_amount caused by a discount
+REGIONS = ["NA", "EU", "APAC", "LATAM"]
+TIERS = ["bronze", "silver", "gold"]
+RNG_SEED = 42
+
+
+def _build_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    rng = random.Random(RNG_SEED)
+    base_day = date(2024, 1, 1)
+
+    customers, orders, exposures = [], [], []
+    region_effect = {"NA": 10.0, "EU": 6.0, "APAC": 4.0, "LATAM": 0.0}
+
+    for cid in range(1, N_CUSTOMERS + 1):
+        age = rng.randint(18, 70)
+        region = rng.choice(REGIONS)
+        customers.append(
+            {
+                "customer_id": cid,
+                "signup_date": base_day + timedelta(days=rng.randint(0, 600)),
+                "region": region,
+                "age": age,
+                "loyalty_tier": rng.choice(TIERS),
+            }
+        )
+
+        received_discount = 1 if rng.random() < 0.5 else 0
+        discount_pct = round(rng.uniform(5, 25), 2) if received_discount else 0.0
+        # Outcome model: base + true treatment effect + covariate effects + noise.
+        total = (
+            50.0
+            + TRUE_DISCOUNT_ATE * received_discount
+            + 0.4 * age
+            + region_effect[region]
+            + rng.gauss(0, 8)
+        )
+        orders.append(
+            {
+                "order_id": cid,
+                "customer_id": cid,
+                "order_date": base_day + timedelta(days=rng.randint(0, 600)),
+                "received_discount": received_discount,
+                "discount_pct": discount_pct,
+                "total_amount": round(max(total, 0.0), 2),
+                "num_items": rng.randint(1, 8),
+            }
+        )
+
+        exposures.append(
+            {
+                "exposure_id": cid,
+                "customer_id": cid,
+                "campaign_id": f"CAMP-{rng.randint(1, 5)}",
+                "exposed": 1 if rng.random() < 0.6 else 0,
+                "exposure_date": base_day + timedelta(days=rng.randint(0, 600)),
+            }
+        )
+
+    return (
+        pd.DataFrame(customers),
+        pd.DataFrame(orders),
+        pd.DataFrame(exposures),
+    )
+
+
+def main() -> None:
+    engine = get_engine()
+    customers, orders, exposures = _build_frames()
+
+    with engine.begin() as conn:
+        for statement in DDL:
+            conn.execute(text(statement))
+
+    # Append into the freshly created tables (preserves PK/FK definitions).
+    customers.to_sql("customers", engine, if_exists="append", index=False)
+    orders.to_sql("orders", engine, if_exists="append", index=False)
+    exposures.to_sql("marketing_exposures", engine, if_exists="append", index=False)
+
+    print(
+        f"Seeded {len(customers)} customers, {len(orders)} orders, "
+        f"{len(exposures)} exposures. True discount ATE = {TRUE_DISCOUNT_ATE} USD."
+    )
+
+
+if __name__ == "__main__":
+    main()
