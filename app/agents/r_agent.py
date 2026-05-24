@@ -6,8 +6,11 @@ estimates a causally adjusted effect. The roles are fixed by the spec — the
 agent does not guess them from column names. For a binary treatment it uses
 MatchIt propensity-score matching and reports the post-match covariate balance
 (the largest standardised mean difference), so a poorly balanced match is
-visible rather than hidden. Falls back to a covariate-adjusted ``lm()`` when
-matching is not applicable. The script reads its CSV from DATA_FILE_PATH and
+visible rather than hidden. A balance gate makes method selection data-driven:
+if the match fails to balance the covariates (max_smd >= 0.1), the script
+discards the matched estimate and falls back to a covariate-adjusted ``lm()`` on
+the full data — so an unreliable matched estimate is never the reported result.
+It also falls back to ``lm()`` when matching errors or is not applicable. The script reads its CSV from DATA_FILE_PATH and
 prints one strict JSON object: ``p_value``, ``ate``, ``method``, ``n_used`` and
 (when matched) ``max_smd``.
 """
@@ -49,6 +52,15 @@ Contract (follow exactly):
          s <- summary(m)$sum.matched
          max_smd <- max(abs(s[, "Std. Mean Diff."]), na.rm = TRUE)
          method <- "psm_matchit_lm"; n_used <- nrow(md)
+     BALANCE GATE — a matched estimate is only trustworthy if the match
+     actually balanced the covariates. If max_smd >= 0.1 (poor balance), DO
+     NOT report the matched estimate; fall back to a covariate-adjusted model
+     on the full data, which does not depend on achieving match balance:
+         if (!is.na(max_smd) && max_smd >= 0.1) {
+             model <- lm(as.formula(paste(OUTCOME, "~", TREATMENT, "+",
+                         paste(CONFOUNDERS, collapse=" + "))), data = df)
+             method <- "covariate_adjusted_lm"; n_used <- nrow(df); max_smd <- NA
+         }
      On any matching error, fall back in the error handler to a covariate-
      adjusted model on the full data:
          model <- lm(<OUTCOME ~ TREATMENT + CONFOUNDERS>, data = df)

@@ -52,12 +52,17 @@ def evaluator_node(state: CausalGraphState) -> dict:
             output["n_used"] = parsed["n_used"]
 
         # Post-match covariate balance. A common rule of thumb: a standardised
-        # mean difference under 0.1 indicates good balance. If matching produced
-        # poor balance, the estimate is unreliable and we flag it.
+        # mean difference under 0.1 indicates good balance. Balance is only
+        # meaningful when a matching method ran (max_smd is a real number); when
+        # max_smd is null — no matching, e.g. a covariate-adjusted lm — balance
+        # is N/A (None), NOT False, so we don't imply a non-matched estimate is
+        # "poorly balanced".
         if "max_smd" in parsed:
             max_smd = parsed["max_smd"]
             output["max_smd"] = max_smd
-            output["balanced"] = max_smd is not None and float(max_smd) < _BALANCE_THRESHOLD
+            output["balanced"] = (
+                float(max_smd) < _BALANCE_THRESHOLD if max_smd is not None else None
+            )
 
         return {
             "statistical_output": output,
