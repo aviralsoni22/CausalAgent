@@ -35,15 +35,23 @@ celery_app.conf.update(
 
 @celery_app.task(name="run_causal_analysis", bind=True)
 def run_causal_analysis(
-    self, task_id: str, user_query: str, analysis_spec: dict | None = None
+    self,
+    task_id: str,
+    user_query: str,
+    analysis_spec: dict | None = None,
+    window: dict | None = None,
 ) -> dict:
     """Run the full SQL -> R -> evaluate -> review pipeline for one query.
 
     ``analysis_spec`` optionally pins the causal identification; otherwise the
-    SQL agent proposes it.
+    SQL agent proposes it. ``window`` optionally restricts the analysis to one
+    tumbling batch of orders (order_id in (lo, hi]).
     """
     state = initial_state(
-        task_id=task_id, user_query=user_query, analysis_spec=analysis_spec
+        task_id=task_id,
+        user_query=user_query,
+        analysis_spec=analysis_spec,
+        window=window,
     )
     # Recursion limit comfortably covers the bounded retry loops.
     final_state = compiled_graph.invoke(state, config={"recursion_limit": 50})

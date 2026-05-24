@@ -62,3 +62,40 @@ DATA_DIR: str = os.environ.get("DATA_DIR", "data")
 
 # --- Orchestration --------------------------------------------------------
 MAX_RETRIES: int = int(os.environ.get("MAX_RETRIES", "3"))
+
+
+# --- Kafka / event-driven layer (Phase 3) ---------------------------------
+# Local dev points at the Redpanda container's external listener. In deployment
+# this becomes the managed-Kafka bootstrap server and the SASL/TLS settings
+# below are filled in — no application code changes, only env.
+KAFKA_BOOTSTRAP_SERVERS: str = os.environ.get(
+    "KAFKA_BOOTSTRAP_SERVERS", "localhost:19092"
+)
+KAFKA_TOPIC: str = os.environ.get("KAFKA_TOPIC", "order-events")
+KAFKA_CONSUMER_GROUP: str = os.environ.get("KAFKA_CONSUMER_GROUP", "causal-consumer")
+# How many ingested events trigger one automatic causal analysis. Kept high so a
+# demo fires the (LLM + R) pipeline deliberately, not on every message.
+KAFKA_TRIGGER_THRESHOLD: int = int(os.environ.get("KAFKA_TRIGGER_THRESHOLD", "500"))
+
+# Auth: PLAINTEXT for local Redpanda; SASL_SSL + SCRAM/PLAIN for managed Kafka.
+KAFKA_SECURITY_PROTOCOL: str = os.environ.get("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+KAFKA_SASL_MECHANISM: str = os.environ.get("KAFKA_SASL_MECHANISM", "")
+KAFKA_SASL_USERNAME: str = os.environ.get("KAFKA_SASL_USERNAME", "")
+KAFKA_SASL_PASSWORD: str = os.environ.get("KAFKA_SASL_PASSWORD", "")
+
+
+def kafka_client_kwargs() -> dict:
+    """Connection kwargs shared by the producer and consumer.
+
+    Returns only the security args that are actually configured, so the same
+    code path serves local PLAINTEXT (no auth) and managed SASL_SSL brokers.
+    """
+    kwargs: dict = {
+        "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS.split(","),
+        "security_protocol": KAFKA_SECURITY_PROTOCOL,
+    }
+    if KAFKA_SASL_MECHANISM:
+        kwargs["sasl_mechanism"] = KAFKA_SASL_MECHANISM
+        kwargs["sasl_plain_username"] = KAFKA_SASL_USERNAME
+        kwargs["sasl_plain_password"] = KAFKA_SASL_PASSWORD
+    return kwargs

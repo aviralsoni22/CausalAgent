@@ -13,11 +13,11 @@ not the LLM, so Rule 2 (rows never enter LLM context) is unaffected.
 from __future__ import annotations
 
 import base64
-import traceback
 from pathlib import Path
 
 import requests
 
+from app.agents.feedback import record_failure
 from app.core import config
 from app.core.state import CausalGraphState
 
@@ -27,14 +27,27 @@ _session = requests.Session()
 
 
 def executor_node(state: CausalGraphState) -> dict:
+    # Read and encode the extracted CSV. A failure here (missing/unreadable
+    # file) is not a script problem, but regenerating R cannot fix it either, so
+    # treat it as transient and let the executor's bounded budget end the run.
     try:
         csv_path = Path(state["data_file_path"])
         data_content_b64 = base64.b64encode(csv_path.read_bytes()).decode("ascii")
-        payload = {
-            "r_script": state["r_script"],
-            "data_filename": csv_path.name,
-            "data_content_b64": data_content_b64,
-        }
+    except Exception as exc:
+        return record_failure(
+            state, "executor", "exec_failed_transient",
+            error_detail=f"could not read extracted CSV: {exc!r}",
+        )
+
+    payload = {
+        "r_script": state["r_script"],
+        "data_filename": csv_path.name,
+        "data_content_b64": data_content_b64,
+    }
+
+    # Transport-level failure (sandbox unreachable, timeout, 5xx, non-JSON body)
+    # is infrastructure, not the script — retry the call, do not regenerate R.
+    try:
         resp = _session.post(
             f"{config.R_SANDBOX_URL}/execute",
             json=payload,
@@ -42,24 +55,26 @@ def executor_node(state: CausalGraphState) -> dict:
         )
         resp.raise_for_status()
         body = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        return record_failure(
+            state, "executor", "exec_failed_transient",
+            error_detail=f"sandbox call failed: {exc!r}",
+        )
 
-        if not body.get("success"):
-            raise RuntimeError(
-                "R sandbox reported failure "
-                f"(returncode={body.get('returncode')}):\n{body.get('stderr', '')}"
-            )
+    # The sandbox ran Rscript and it exited non-zero: a bad script. Route back
+    # to the R agent, surfacing stderr so the retry hint can correct it.
+    if not body.get("success"):
+        detail = (
+            f"R sandbox returned non-zero (returncode={body.get('returncode')}).\n"
+            f"stderr:\n{body.get('stderr', '')}"
+        )
+        return record_failure(state, "executor", "exec_failed_script", error_detail=detail)
 
-        # Hand the raw stdout to the evaluator; it owns JSON parsing.
-        return {
-            "statistical_output": {
-                "raw_stdout": body.get("stdout", ""),
-                "stderr": body.get("stderr", ""),
-            },
-            "current_status": "executed",
-        }
-    except Exception:
-        return {
-            "errors": state["errors"] + [f"[executor]\n{traceback.format_exc()}"],
-            "retry_count": state["retry_count"] + 1,
-            "current_status": "exec_failed",
-        }
+    # Hand the raw stdout to the evaluator; it owns JSON parsing.
+    return {
+        "statistical_output": {
+            "raw_stdout": body.get("stdout", ""),
+            "stderr": body.get("stderr", ""),
+        },
+        "current_status": "executed",
+    }

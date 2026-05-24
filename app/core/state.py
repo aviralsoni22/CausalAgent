@@ -18,6 +18,10 @@ class CausalGraphState(TypedDict):
     # LLM-generated R script. Shape: {"treatment": str, "outcome": str,
     # "confounders": List[str]}.
     analysis_spec: Optional[dict]
+    # Optional tumbling-window filter for the event-driven layer (Phase 3):
+    # {"lo": int, "hi": int} restricts the analysis to orders whose order_id is
+    # in (lo, hi]. None means analyse the whole table (the synchronous API path).
+    window: Optional[dict]
     sql_query: Optional[str]
     data_file_path: Optional[str]
     extracted_columns: Optional[List[str]]
@@ -25,5 +29,12 @@ class CausalGraphState(TypedDict):
     statistical_output: Optional[dict]  # {"p_value", "ate", "is_significant", "method", "n_used", "max_smd", "balanced"}
     business_narrative: Optional[str]
     errors: List[str]
+    # Total failures across all nodes — drives the human-readable fallback
+    # message and is a quick "how hard did this fight" signal in provenance.
     retry_count: int
+    # Per-node failure counts, keyed by node name ("sql_agent", "r_agent",
+    # "executor", ...). Each node gets its OWN MAX_RETRIES budget, so a single
+    # hiccup at each of several stages no longer exhausts one shared counter;
+    # exhaustion is decided per node, not globally.
+    retries: Dict[str, int]
     current_status: str

@@ -9,13 +9,12 @@ column names move forward.
 from __future__ import annotations
 
 import re
-import traceback
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
 
-from app.agents.feedback import retry_hint
+from app.agents.feedback import record_failure, retry_hint
 from app.core import config
 from app.core.db import get_engine
 from app.core.llm import get_llm
@@ -43,16 +42,46 @@ Schema:
 """
 
 # Used when the caller has already declared the identification; the LLM only has
-# to write a SELECT that projects exactly those columns.
+# to write a SELECT that projects exactly those columns. It must also project
+# the orders primary key as `order_id` so the event-driven layer can restrict a
+# run to a window of orders deterministically (without the LLM writing filters).
 _SYSTEM_PROMPT_FIXED_SPEC = """You are a senior analytics engineer. Write ONE \
 read-only PostgreSQL SELECT (a leading WITH/CTE is allowed; no other statement \
-types) that projects EXACTLY these columns (use these names as aliases):
-treatment="{treatment}", outcome="{outcome}", confounders={confounders}.
+types) returning one row per order. The result MUST have these EXACT output \
+column names — use each string verbatim as the SELECT alias, and do NOT rename \
+them to generic labels such as "treatment" or "outcome":
+{columns}
 Do not invent tables or columns outside the schema.
 
 Schema:
 {schema}
 """
+
+
+def _fixed_spec_columns(spec: AnalysisSpec) -> str:
+    lines = [
+        f'- "{spec.treatment}"  (binary 0/1 treatment)',
+        f'- "{spec.outcome}"  (numeric outcome)',
+    ]
+    lines += [f'- "{c}"  (confounder)' for c in spec.confounders]
+    # Required so the event-driven layer can window deterministically by order.
+    lines.append('- "order_id"  (the orders table primary key)')
+    return "\n".join(lines)
+
+
+def _apply_window(safe_sql: str, window: dict) -> tuple[str, dict]:
+    """Wrap a validated SELECT so only orders in (lo, hi] survive.
+
+    The filter is applied by *our* code, not the LLM: the agent's query becomes
+    a CTE and we filter on the order_id it was required to project. Deterministic
+    and injection-free (bound parameters).
+    """
+    wrapped = (
+        "WITH _windowed AS (\n"
+        f"{safe_sql}\n"
+        ") SELECT * FROM _windowed WHERE order_id > :win_lo AND order_id <= :win_hi"
+    )
+    return wrapped, {"win_lo": int(window["lo"]), "win_hi": int(window["hi"])}
 
 # Statements we refuse to execute even if the LLM produces them. Defence in
 # depth: the prompt forbids them, but the query is still executed against a live
@@ -98,9 +127,7 @@ def sql_agent_node(state: CausalGraphState) -> dict:
         if user_spec:
             spec = AnalysisSpec(**user_spec)
             system = _SYSTEM_PROMPT_FIXED_SPEC.format(
-                treatment=spec.treatment,
-                outcome=spec.outcome,
-                confounders=spec.confounders,
+                columns=_fixed_spec_columns(spec),
                 schema=SCHEMA_PROMPT,
             )
             safe_sql = _validate_select(
@@ -118,13 +145,21 @@ def sql_agent_node(state: CausalGraphState) -> dict:
             spec = result.spec
             safe_sql = _validate_select(result.sql_query)
 
+        # Event-driven layer: restrict the run to one tumbling window of orders.
+        # Applied deterministically here, never by the LLM.
+        window = state.get("window")
+        params: dict = {}
+        exec_sql = safe_sql
+        if window:
+            exec_sql, params = _apply_window(safe_sql, window)
+
         # Defence in depth: run inside a Postgres READ ONLY connection so the
         # database itself rejects any write that slipped past _validate_select
         # (e.g. a data-modifying CTE). The pooled engine is shared, never
         # recreated per task.
         engine = get_engine()
         with engine.connect().execution_options(postgresql_readonly=True) as conn:
-            df = pd.read_sql(text(safe_sql), conn)
+            df = pd.read_sql(text(exec_sql), conn, params=params)
 
         if df.empty:
             raise ValueError("Query returned zero rows; cannot run a model on it.")
@@ -138,7 +173,8 @@ def sql_agent_node(state: CausalGraphState) -> dict:
         df.to_csv(file_path, index=False)
 
         return {
-            "sql_query": safe_sql,
+            # Persist what actually ran (windowed, if applicable) for provenance.
+            "sql_query": exec_sql,
             "data_file_path": str(file_path),
             # Trust the real dataframe columns over the LLM's claim.
             "extracted_columns": columns,
@@ -146,8 +182,4 @@ def sql_agent_node(state: CausalGraphState) -> dict:
             "current_status": "sql_done",
         }
     except Exception:
-        return {
-            "errors": state["errors"] + [f"[sql_agent]\n{traceback.format_exc()}"],
-            "retry_count": state["retry_count"] + 1,
-            "current_status": "sql_failed",
-        }
+        return record_failure(state, "sql_agent", "sql_failed")

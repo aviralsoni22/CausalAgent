@@ -6,8 +6,7 @@ terminal happy-path node.
 """
 from __future__ import annotations
 
-import traceback
-
+from app.agents.feedback import record_failure
 from app.core.llm import get_llm
 from app.core.state import CausalGraphState
 from app.models.schemas import BusinessNarrative
@@ -61,8 +60,4 @@ def reviewer_node(state: CausalGraphState) -> dict:
             "current_status": "completed",
         }
     except Exception:
-        return {
-            "errors": state["errors"] + [f"[reviewer]\n{traceback.format_exc()}"],
-            "retry_count": state["retry_count"] + 1,
-            "current_status": "review_failed",
-        }
+        return record_failure(state, "reviewer", "review_failed")

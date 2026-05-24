@@ -14,9 +14,8 @@ prints one strict JSON object: ``p_value``, ``ate``, ``method``, ``n_used`` and
 from __future__ import annotations
 
 import json
-import traceback
 
-from app.agents.feedback import retry_hint
+from app.agents.feedback import record_failure, retry_hint
 from app.core.llm import get_llm
 from app.core.state import CausalGraphState
 from app.models.schemas import RScriptGeneration
@@ -89,8 +88,4 @@ def r_agent_node(state: CausalGraphState) -> dict:
             "current_status": "r_generated",
         }
     except Exception:
-        return {
-            "errors": state["errors"] + [f"[r_agent]\n{traceback.format_exc()}"],
-            "retry_count": state["retry_count"] + 1,
-            "current_status": "r_failed",
-        }
+        return record_failure(state, "r_agent", "r_failed")

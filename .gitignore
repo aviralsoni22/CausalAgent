@@ -14,5 +14,8 @@ data/*.csv
 # OS noise
 .DS_Store
 
-# Internal architecture notes (not for public repo)
-docs/decisions/
+# Internal working docs (architecture notes, ADRs) — conveyed via README instead
+docs/
+
+# Internal master prompt — kept local, not for the public repo
+MASTER_PROMPT.md

@@ -27,6 +27,27 @@ services:
       # Persist database data across restarts and container recreations
       - pgdata:/var/lib/postgresql/data
 
+  redpanda:
+    # Kafka-compatible broker for the Phase 3 event-driven layer (local dev).
+    # Speaks the Kafka protocol, so the same client code runs against this
+    # locally and against a managed Kafka (e.g. Upstash) in deployment — only
+    # KAFKA_BOOTSTRAP_SERVERS / SASL settings change. Two listeners: one for
+    # other containers on the compose network (redpanda:29092) and one for host
+    # processes such as the dev producer/consumer (localhost:19092).
+    image: redpandadata/redpanda:v24.2.7
+    container_name: causal_redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=INTERNAL://redpanda:29092,EXTERNAL://localhost:19092
+    ports:
+      - "19092:19092"
+
   r_sandbox:
     # Isolated polyglot execution service. Runs untrusted, LLM-generated R code
     # in a container with no database credentials and no access to the LLM.

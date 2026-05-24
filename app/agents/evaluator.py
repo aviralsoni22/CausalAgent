@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import re
-import traceback
 
+from app.agents.feedback import record_failure
 from app.core.state import CausalGraphState
 
 _SIGNIFICANCE_THRESHOLD = 0.05
@@ -64,8 +64,4 @@ def evaluator_node(state: CausalGraphState) -> dict:
             "current_status": "evaluated",
         }
     except Exception:
-        return {
-            "errors": state["errors"] + [f"[evaluator]\n{traceback.format_exc()}"],
-            "retry_count": state["retry_count"] + 1,
-            "current_status": "eval_failed",
-        }
+        return record_failure(state, "evaluator", "eval_failed")
