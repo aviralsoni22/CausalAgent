@@ -13,3 +13,6 @@ data/*.csv
 
 # OS noise
 .DS_Store
+
+# Internal architecture notes (not for public repo)
+docs/decisions/

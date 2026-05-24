@@ -1,15 +1,16 @@
 """Verify the R sandbox executes a real script end to end (no LLM needed).
 
-Writes a small CSV into DATA_DIR with a known treatment effect, then POSTs a
-hand-written R script (lm + MatchIt) to the sandbox /execute endpoint and prints
-the JSON it returns. Proves: shared volume, Rscript, MatchIt, and the executor's
-HTTP contract all work -- the entire non-LLM half of the pipeline.
+Writes a small CSV with a known treatment effect, then POSTs a hand-written R
+script (lm + MatchIt) plus the CSV content to the sandbox /execute endpoint and
+prints the JSON it returns. Proves: inline data transport, Rscript, MatchIt, and
+the executor's HTTP contract all work -- the entire non-LLM half of the pipeline.
 
 Run (with the stack up):
     .venv/Scripts/python.exe -m scripts.verify_sandbox
 """
 from __future__ import annotations
 
+import base64
 import json
 import random
 from pathlib import Path
@@ -51,9 +52,14 @@ def main() -> int:
     csv_path = _write_csv()
     print(f"Wrote {csv_path} ({N} rows, true ATE = {TRUE_ATE}).")
 
+    data_content_b64 = base64.b64encode(csv_path.read_bytes()).decode("ascii")
     resp = requests.post(
         f"{config.R_SANDBOX_URL}/execute",
-        json={"r_script": R_SCRIPT, "data_file_path": csv_path.name},
+        json={
+            "r_script": R_SCRIPT,
+            "data_filename": csv_path.name,
+            "data_content_b64": data_content_b64,
+        },
         timeout=config.R_SANDBOX_TIMEOUT,
     )
     resp.raise_for_status()

@@ -37,17 +37,13 @@ services:
       dockerfile: Dockerfile
     container_name: causal_r_sandbox
     environment:
-      SANDBOX_DATA_DIR: /sandbox/data
       SANDBOX_WORKSPACE: /sandbox/workspace
       SANDBOX_EXEC_TIMEOUT: "120"
+      # Max decoded CSV size accepted by /execute (inline data transport).
+      SANDBOX_MAX_CSV_BYTES: "26214400"
     ports:
       # Expose the sandbox on 8001 for the orchestrator to POST scripts to
       - "8001:8001"
-    volumes:
-      # Shared data volume: CSVs written by the SQL agent are mounted read-only
-      # here so the R script can read them. Read-only since the sandbox should
-      # never mutate source data.
-      - ./data:/sandbox/data:ro
 
 volumes:
   # Named volume for durable Postgres storage

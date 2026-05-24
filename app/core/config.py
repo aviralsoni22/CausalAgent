@@ -55,8 +55,9 @@ R_SANDBOX_URL: str = os.environ.get("R_SANDBOX_URL", "http://localhost:8001")
 R_SANDBOX_TIMEOUT: int = int(os.environ.get("R_SANDBOX_TIMEOUT", "150"))
 
 # --- Local data ------------------------------------------------------------
-# Where the SQL agent writes extracted CSVs. Must be a shared volume with the
-# r_sandbox service so the R script can read the file.
+# Where the SQL agent writes extracted CSVs. The executor reads the file back
+# and ships its content to the sandbox in the request body, so this is a purely
+# local working directory — no shared volume with the sandbox is required.
 DATA_DIR: str = os.environ.get("DATA_DIR", "data")
 
 # --- Orchestration --------------------------------------------------------
