@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.agents.feedback import record_failure
 from app.core.llm import get_llm
+from app.core.observability import run_config
 from app.core.state import CausalGraphState
 from app.models.schemas import BusinessNarrative
 
@@ -53,7 +54,8 @@ def reviewer_node(state: CausalGraphState) -> dict:
         )
         llm = get_llm().with_structured_output(BusinessNarrative)
         result: BusinessNarrative = llm.invoke(
-            [("system", _SYSTEM_PROMPT), ("human", human)]
+            [("system", _SYSTEM_PROMPT), ("human", human)],
+            config=run_config(state, "reviewer"),
         )
         return {
             "business_narrative": result.business_narrative,

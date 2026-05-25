@@ -20,6 +20,7 @@ import json
 
 from app.agents.feedback import record_failure, retry_hint
 from app.core.llm import get_llm
+from app.core.observability import run_config
 from app.core.state import CausalGraphState
 from app.models.schemas import RScriptGeneration
 
@@ -93,7 +94,8 @@ def r_agent_node(state: CausalGraphState) -> dict:
         )
         llm = get_llm().with_structured_output(RScriptGeneration)
         result: RScriptGeneration = llm.invoke(
-            [("system", _SYSTEM_PROMPT), ("human", human)]
+            [("system", _SYSTEM_PROMPT), ("human", human)],
+            config=run_config(state, "r_agent"),
         )
         return {
             "r_script": result.r_script,

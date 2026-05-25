@@ -18,6 +18,7 @@ from app.agents.feedback import record_failure, retry_hint
 from app.core import config
 from app.core.db import get_engine
 from app.core.llm import get_llm
+from app.core.observability import run_config
 from app.core.schema_def import SCHEMA_PROMPT
 from app.core.state import CausalGraphState
 from app.models.schemas import AnalysisSpec, SQLGeneration
@@ -121,6 +122,7 @@ def _validate_spec(spec: AnalysisSpec, columns: list[str]) -> None:
 def sql_agent_node(state: CausalGraphState) -> dict:
     try:
         llm = get_llm()
+        rc = run_config(state, "sql_agent")
         # Honour a caller-provided identification if present; otherwise let the
         # LLM propose one. Either way the spec ends up explicit in the state.
         user_spec = state.get("analysis_spec")
@@ -132,7 +134,10 @@ def sql_agent_node(state: CausalGraphState) -> dict:
             )
             safe_sql = _validate_select(
                 llm.with_structured_output(SQLGeneration)
-                .invoke([("system", system), ("human", state["user_query"] + retry_hint(state))])
+                .invoke(
+                    [("system", system), ("human", state["user_query"] + retry_hint(state))],
+                    config=rc,
+                )
                 .sql_query
             )
         else:
@@ -140,7 +145,8 @@ def sql_agent_node(state: CausalGraphState) -> dict:
                 [
                     ("system", _SYSTEM_PROMPT.format(schema=SCHEMA_PROMPT)),
                     ("human", state["user_query"] + retry_hint(state)),
-                ]
+                ],
+                config=rc,
             )
             spec = result.spec
             safe_sql = _validate_select(result.sql_query)

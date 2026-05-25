@@ -12,9 +12,14 @@ from celery import Celery
 
 from app.core import config
 from app.core.graph import compiled_graph, initial_state
+from app.core.observability import configure_tracing
 from app.core.persistence import save_run
 
 logger = logging.getLogger(__name__)
+
+# Wire LangSmith tracing (or explicitly disable it) before any task runs, so
+# every LLM call this worker makes is traced when the env gate is on.
+configure_tracing()
 
 celery_app = Celery(
     "causalagent",

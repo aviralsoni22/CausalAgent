@@ -13,6 +13,34 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# --- Observability (Phase 4): LangSmith LLM tracing -----------------------
+# Env-gated and OFF by default. This platform's identity is "nothing leaves the
+# perimeter unless explicitly turned on" (Rules 2 and 5): traces carry the
+# schema, generated SQL, R scripts and statistical outputs to LangSmith's hosted
+# store, so emitting them is an opt-in decision per environment — never the
+# default. Raw database rows are still never traced (Rule 2 is untouched: the
+# rows never enter an LLM call in the first place).
+LANGSMITH_TRACING: bool = os.environ.get("LANGSMITH_TRACING", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+LANGSMITH_API_KEY: str = os.environ.get("LANGSMITH_API_KEY", "")
+LANGSMITH_PROJECT: str = os.environ.get("LANGSMITH_PROJECT", "causalagent")
+LANGSMITH_ENDPOINT: str = os.environ.get(
+    "LANGSMITH_ENDPOINT", "https://api.smith.langchain.com"
+)
+
+
+def tracing_enabled() -> bool:
+    """True only when tracing is both switched on AND has a key to ship to.
+
+    Keeping the gate here (rather than reading the env directly in callers) means
+    "is tracing active?" has one definition the whole codebase agrees on.
+    """
+    return LANGSMITH_TRACING and bool(LANGSMITH_API_KEY)
+
+
 # --- LLM ------------------------------------------------------------------
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model is env-configurable. The roadmap names "Claude 3.5"; we default to a

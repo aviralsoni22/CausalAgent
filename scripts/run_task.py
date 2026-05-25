@@ -18,6 +18,7 @@ import uuid
 
 from app.core import config
 from app.core.graph import compiled_graph, initial_state
+from app.core.observability import configure_tracing
 
 DEFAULT_QUERY = (
     "Did receiving a discount cause customers to spend more per order? "
@@ -29,6 +30,9 @@ def main(argv: list[str]) -> int:
     if not config.ANTHROPIC_API_KEY:
         print("ANTHROPIC_API_KEY is empty. Add it to .env, then re-run.", file=sys.stderr)
         return 1
+
+    tracing = configure_tracing()
+    print(f"tracing : {'on (LangSmith)' if tracing else 'off'}")
 
     query = argv[1] if len(argv) > 1 else DEFAULT_QUERY
     task_id = uuid.uuid4().hex[:12]
