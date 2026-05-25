@@ -41,6 +41,33 @@ def tracing_enabled() -> bool:
     return LANGSMITH_TRACING and bool(LANGSMITH_API_KEY)
 
 
+# --- Observability (Phase 4): MLflow causal-run tracking ------------------
+# Env-gated and OFF by default, like tracing. Where LangSmith captures the LLM
+# *calls*, MLflow records the *result of each causal analysis* as a comparable
+# experiment run (params: treatment/outcome/confounders/method; metrics: ate,
+# p_value, max_smd; artifacts: the SQL and R script). Its non-redundant value
+# over the analysis_runs audit table is cross-run comparison/trending — e.g.
+# watching the ATE drift as new clickstream data arrives. The default tracking
+# URI is a local file store; point it at a remote MLflow server via env in
+# deployment (no code change — Rule 5).
+MLFLOW_TRACKING: bool = os.environ.get("MLFLOW_TRACKING", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MLFLOW_TRACKING_URI: str = os.environ.get("MLFLOW_TRACKING_URI", "./mlruns")
+MLFLOW_EXPERIMENT: str = os.environ.get("MLFLOW_EXPERIMENT", "causalagent")
+
+
+def mlflow_enabled() -> bool:
+    """One definition of 'is MLflow tracking active'.
+
+    No API key needed: the default local file store works offline, and a remote
+    server carries its credentials in the tracking URI.
+    """
+    return MLFLOW_TRACKING
+
+
 # --- LLM ------------------------------------------------------------------
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model is env-configurable. The roadmap names "Claude 3.5"; we default to a

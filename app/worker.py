@@ -12,7 +12,7 @@ from celery import Celery
 
 from app.core import config
 from app.core.graph import compiled_graph, initial_state
-from app.core.observability import configure_tracing
+from app.core.observability import configure_tracing, log_causal_run
 from app.core.persistence import save_run
 
 logger = logging.getLogger(__name__)
@@ -66,5 +66,12 @@ def run_causal_analysis(
         save_run(final_state)
     except Exception:
         logger.exception("Failed to persist provenance for task %s", task_id)
+
+    # Best-effort experiment tracking, for the same reason: a tracking failure
+    # must not lose the result. No-op unless MLflow is gated on.
+    try:
+        log_causal_run(final_state)
+    except Exception:
+        logger.exception("Failed to log MLflow run for task %s", task_id)
 
     return dict(final_state)

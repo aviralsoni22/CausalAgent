@@ -11,6 +11,7 @@ dependencies = [
     "langchain-anthropic>=1.4.3",
     "langgraph>=1.2.1",
     "langsmith>=0.8.5",
+    "mlflow-skinny>=2.16",
     "pandas>=2.2.0",
     "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.2.2",
