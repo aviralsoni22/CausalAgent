@@ -29,13 +29,58 @@ from app.core import config
 from app.core.state import CausalGraphState
 
 
+# Where a run gave up, mapped to a next action the user can actually take. Keyed
+# by the failure status the failing node set before routing here, so a dead-end
+# becomes "here's what to try" instead of a traceback dump.
+_FAILURE_GUIDANCE = {
+    "sql_failed": (
+        "I couldn't translate your question into a valid query over the available "
+        "data (customers, orders, marketing exposures). Try naming the outcome "
+        "metric and the treatment/intervention explicitly — e.g. 'did receiving a "
+        "discount raise order total?'"
+    ),
+    "r_failed": (
+        "I extracted the data but couldn't fit a valid model to it. Causal "
+        "estimation needs a yes/no treatment and a numeric outcome — try "
+        "rephrasing so the intervention is binary and the outcome is a number."
+    ),
+    "exec_failed_script": (
+        "The model couldn't run on the extracted data. Try rephrasing so the "
+        "treatment is yes/no and the outcome is numeric; if it persists the data "
+        "for this question may be too sparse to model."
+    ),
+    "exec_failed_transient": (
+        "The analysis service was temporarily unavailable. Please retry in a "
+        "moment — your question was understood, the run just couldn't complete."
+    ),
+    "eval_failed": (
+        "The model ran but returned a result I couldn't read — usually transient. "
+        "Please retry; if it persists, try rephrasing the question."
+    ),
+    "review_failed": (
+        "The analysis completed but I couldn't write the plain-language summary. "
+        "The statistical result is available in the output."
+    ),
+}
+
+_FAILURE_GUIDANCE_DEFAULT = (
+    "The analysis could not be completed. Try rephrasing the question so the "
+    "intervention is yes/no and the outcome is a number."
+)
+
+
 def _fallback_node(state: CausalGraphState) -> dict:
-    """Terminal node reached when retries are exhausted."""
+    """Terminal node reached when retries are exhausted.
+
+    Translate the failing stage into a concrete next action rather than dumping
+    attempt counts and tracebacks on the user; ``errors`` still holds the detail.
+    """
+    guidance = _FAILURE_GUIDANCE.get(state["current_status"], _FAILURE_GUIDANCE_DEFAULT)
     return {
         "current_status": "failed",
         "business_narrative": (
-            "The analysis could not be completed after "
-            f"{state['retry_count']} attempt(s). See `errors` for details."
+            f"{guidance} (Failed after {state['retry_count']} attempt(s); "
+            "see `errors` for technical detail.)"
         ),
     }
 
@@ -155,6 +200,7 @@ def initial_state(
         r_script=None,
         statistical_output=None,
         business_narrative=None,
+        interpretation=None,
         errors=[],
         retry_count=0,
         retries={},

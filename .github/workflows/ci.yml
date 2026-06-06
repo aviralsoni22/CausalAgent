@@ -1,0 +1,66 @@
+name: CI
+
+# Gate: run the test suite on every push to main and every PR, so the security,
+# redaction, validation and pipeline regressions added over time actually block a
+# bad change instead of silently rotting.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Real Postgres so the event-consumer integration tests run for real (they
+    # prove idempotent ingest) instead of being skipped. Matches docker-compose.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: enterprise_dw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d enterprise_dw"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Point the app at the service container (same defaults as config.py).
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: admin
+      DB_PASSWORD: password
+      DB_NAME: enterprise_dw
+      # No ANTHROPIC_API_KEY: the suite is pure-function + DB only; get_llm() is
+      # lazy and never called, so the LLM never needs a key in CI.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Create schema + least-privilege role
+        # Creates the tables the ingest tests write to and the causal_ro role.
+        run: uv run python -m scripts.seed_db
+
+      - name: Run tests
+        # The R-sandbox isolation tests self-skip when no sandbox is reachable
+        # (they need a built, privileged container) — they're run locally via
+        # `docker compose up r_sandbox`, not in this lightweight gate.
+        run: uv run python -m pytest -q

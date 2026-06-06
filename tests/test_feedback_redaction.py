@@ -8,7 +8,7 @@ masking emails or long numbers must fail here.
 """
 from __future__ import annotations
 
-from app.agents.feedback import _redact, retry_hint
+from app.agents.feedback import _redact, record_failure, retry_hint
 
 
 def test_redacts_emails():
@@ -24,6 +24,19 @@ def test_redacts_long_numbers_but_keeps_short_ones():
     assert "4567890" not in out
     assert "[redacted-number]" in out
     assert "row 12" in out and "code 3" in out
+
+
+def test_record_failure_redacts_at_capture():
+    # The error stored in state must already be sanitised, so every downstream
+    # sink (/status, audit DB, retry prompt) inherits the redaction.
+    state = {"errors": [], "retry_count": 0, "retries": {}}
+    out = record_failure(
+        state, "executor", "exec_failed_script",
+        error_detail="stderr: bad value 'bob@corp.com' for customer 998877",
+    )
+    stored = out["errors"][-1]
+    assert "bob@corp.com" not in stored and "998877" not in stored
+    assert "[redacted-email]" in stored and "[redacted-number]" in stored
 
 
 def test_retry_hint_is_empty_without_prior_failure():

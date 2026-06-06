@@ -41,6 +41,9 @@ class StatusResponse(BaseModel):
     task_id: str
     state: str
     result: dict | None = None
+    # Populated while the task is running: {"stage": "model run", "status": ...}
+    # so a polling client can show progress instead of a black-box wait.
+    progress: dict | None = None
 
 
 @app.get("/health")
@@ -62,8 +65,17 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 def status(task_id: str) -> StatusResponse:
     async_result = AsyncResult(task_id, app=celery_app)
     result = async_result.result if async_result.successful() else None
+    # While running, the worker stores the current stage in the task's meta
+    # (state == "PROGRESS", info is the meta dict). Surface it so the caller can
+    # see where the run is rather than polling a silent STARTED.
+    progress = (
+        async_result.info
+        if async_result.state == "PROGRESS" and isinstance(async_result.info, dict)
+        else None
+    )
     return StatusResponse(
         task_id=task_id,
         state=async_result.state,
         result=result if isinstance(result, dict) else None,
+        progress=progress,
     )

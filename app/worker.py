@@ -39,6 +39,54 @@ celery_app.conf.update(
 )
 
 
+# Internal pipeline statuses → a label a waiting caller can understand, so the
+# poll shows "running the model" instead of an opaque Celery STARTED.
+_STAGE_LABELS = {
+    "pending": "queued",
+    "sql_done": "data extracted",
+    "r_generated": "model written",
+    "executed": "model run",
+    "evaluated": "results computed",
+    "completed": "finalizing",
+}
+
+
+# The curated result the task returns — what a caller needs to consume the
+# answer, nothing more. Internal fields (the generated SQL/R, the CSV path, the
+# column list, retry bookkeeping) are deliberately excluded: they don't belong in
+# the API response or the Redis result backend. Full provenance is kept in the
+# analysis_runs audit table, not handed to clients. ``errors`` is included only
+# when present and is already redacted at capture (see feedback.record_failure).
+_PUBLIC_RESULT_FIELDS = (
+    "task_id",
+    "current_status",
+    "analysis_spec",       # machine-readable identification (treatment/outcome/...)
+    "interpretation",      # the same, in plain language, for human verification
+    "statistical_output",
+    "business_narrative",
+)
+
+
+def public_result(state: dict) -> dict:
+    """Project the final graph state down to the client-facing result."""
+    out = {field: state.get(field) for field in _PUBLIC_RESULT_FIELDS}
+    if state.get("errors"):
+        out["errors"] = state["errors"]
+    return out
+
+
+def progress_meta(status: str, task_id: str) -> dict:
+    """Build the Celery PROGRESS meta for one pipeline stage."""
+    if status in _STAGE_LABELS:
+        label = _STAGE_LABELS[status]
+    elif status and ("_failed" in status or status == "failed"):
+        # A node failed and the graph is recovering (retrying or giving up).
+        label = "retrying"
+    else:
+        label = "working"
+    return {"task_id": task_id, "status": status, "stage": label}
+
+
 @celery_app.task(name="run_causal_analysis", bind=True)
 def run_causal_analysis(
     self,
@@ -60,8 +108,18 @@ def run_causal_analysis(
         window=window,
     )
     try:
-        # Recursion limit comfortably covers the bounded retry loops.
-        final_state = compiled_graph.invoke(state, config={"recursion_limit": 50})
+        # Stream rather than invoke so we can publish each stage as the graph
+        # advances; the last value yielded is the final state (identical to what
+        # invoke would return). Recursion limit covers the bounded retry loops.
+        final_state = None
+        for step in compiled_graph.stream(
+            state, config={"recursion_limit": 50}, stream_mode="values"
+        ):
+            final_state = step
+            self.update_state(
+                state="PROGRESS",
+                meta=progress_meta(step.get("current_status", ""), task_id),
+            )
 
         # Best-effort audit trail: never let a persistence problem lose the result.
         try:
@@ -76,7 +134,7 @@ def run_causal_analysis(
         except Exception:
             logger.exception("Failed to log MLflow run for task %s", task_id)
 
-        return dict(final_state)
+        return public_result(final_state)
     finally:
         # Always delete the extracted rows (customer PII) once the run is over,
         # success or failure — they must not linger on disk. Runs even if the

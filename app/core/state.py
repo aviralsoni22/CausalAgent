@@ -28,6 +28,11 @@ class CausalGraphState(TypedDict):
     r_script: Optional[str]
     statistical_output: Optional[dict]  # {"p_value", "ate", "is_significant", "method", "n_used", "max_smd", "balanced"}
     business_narrative: Optional[str]
+    # Deterministic, plain-language statement of HOW the question was interpreted
+    # — the effect of which treatment on which outcome, adjusting for which
+    # confounders, over how many observations. Built from analysis_spec (not the
+    # LLM) so the user can verify we answered the question they actually meant.
+    interpretation: Optional[str]
     errors: List[str]
     # Total failures across all nodes — drives the human-readable fallback
     # message and is a quick "how hard did this fight" signal in provenance.
