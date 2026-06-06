@@ -51,8 +51,19 @@ services:
   r_sandbox:
     # Isolated polyglot execution service. Runs untrusted, LLM-generated R code
     # in a container with no database credentials and no access to the LLM.
-    # Enterprise: tighten further with a read-only rootfs, dropped capabilities,
-    # seccomp profile, and network egress restrictions before production.
+    #
+    # Hardening (the R process holds the extracted rows — the sensitive asset —
+    # so containment matters as much as credential isolation):
+    #   * cap_drop ALL, re-adding only NET_ADMIN so the entrypoint can install the
+    #     egress firewall; nothing else is permitted.
+    #   * SANDBOX_NETWORK_ISOLATION=1 -> entrypoint sets OUTPUT policy DROP, so a
+    #     script cannot exfiltrate the data over the network (it can still be
+    #     reached by the orchestrator — that is inbound/established traffic).
+    #   * read-only rootfs; the only writable paths are tmpfs (per-request R
+    #     scripts/CSVs and temp), which are wiped and never touch disk.
+    #   * no-new-privileges, a pids cap, and a memory cap bound a runaway script.
+    # In a multi-host deploy prefer denying egress at the network layer too (an
+    # internal-only network); the in-container firewall is the portable default.
     build:
       context: ./sandbox
       dockerfile: Dockerfile
@@ -62,9 +73,30 @@ services:
       SANDBOX_EXEC_TIMEOUT: "120"
       # Max decoded CSV size accepted by /execute (inline data transport).
       SANDBOX_MAX_CSV_BYTES: "26214400"
+      # 1 = entrypoint denies network egress; 0 only if egress is blocked
+      # externally (e.g. an internal-only network). Fails closed when it cannot
+      # apply the rule, rather than running untrusted R with the network open.
+      SANDBOX_NETWORK_ISOLATION: "1"
     ports:
-      # Expose the sandbox on 8001 for the orchestrator to POST scripts to
-      - "8001:8001"
+      # Bound to loopback only: /execute runs arbitrary LLM-generated R, so the
+      # endpoint must not be reachable from other hosts. The orchestrator runs on
+      # this machine and reaches it via 127.0.0.1:8001. When the worker is itself
+      # containerised, drop this mapping entirely and use `expose: ["8001"]` so
+      # the port lives solely on the internal compose network.
+      - "127.0.0.1:8001:8001"
+    read_only: true
+    tmpfs:
+      - /sandbox/workspace:mode=1777
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      # Only to install the OUTPUT-DROP firewall rule at startup.
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
 
 volumes:
   # Named volume for durable Postgres storage

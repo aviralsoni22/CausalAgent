@@ -89,6 +89,27 @@ def database_url() -> str:
     )
 
 
+# Least-privilege role for the UNTRUSTED query path. The SQL agent runs an
+# LLM-generated SELECT; connecting as the owner (admin) means a prompt-injected
+# query could read any table in the database. This role is granted SELECT on only
+# the three analytics tables (see scripts.seed_db.grant_readonly_role) — no other
+# tables, no writes, no superuser functions. Created by the seed/grant script.
+READONLY_DB_USER: str = os.environ.get("READONLY_DB_USER", "causal_ro")
+READONLY_DB_PASSWORD: str = os.environ.get("READONLY_DB_PASSWORD", "readonly")
+
+
+def readonly_database_url() -> str:
+    return (
+        f"postgresql+psycopg2://{READONLY_DB_USER}:{READONLY_DB_PASSWORD}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+
+
+# Per-statement timeout (ms) for the LLM-generated read-only SELECT. Bounds a
+# runaway/adversarial query (cartesian join, pg_sleep) so it cannot pin a pooled
+# connection. Applied via SET statement_timeout in the SQL agent.
+SQL_STATEMENT_TIMEOUT_MS: int = int(os.environ.get("SQL_STATEMENT_TIMEOUT_MS", "30000"))
+
 # Connection-pool tuning for the shared engine (see app/core/db.py).
 DB_POOL_SIZE: int = int(os.environ.get("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW: int = int(os.environ.get("DB_MAX_OVERFLOW", "10"))

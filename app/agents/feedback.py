@@ -7,12 +7,28 @@ into the prompt, giving the LLM a concrete chance to fix what broke.
 """
 from __future__ import annotations
 
+import re
 import traceback
 
 from app.core.state import CausalGraphState
 
 # Cap so a giant traceback can't blow the prompt budget.
 _MAX_ERROR_CHARS = 2000
+
+# A failed R run's stderr can echo actual data values (e.g. "unexpected value
+# 'jane@example.com' in row 12"). That text is fed back into the next LLM prompt
+# by retry_hint and, when tracing is on, shipped to a hosted store — both a
+# breach of Rule 2 (raw rows never reach the LLM). Best-effort redaction masks
+# the value-shaped tokens that most commonly leak before the error is reused.
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
+# 4+ digit runs: ids, amounts, phone numbers. Short numbers (R line/row counts,
+# return codes) are left alone so the diagnostic stays useful.
+_LONGNUM_RE = re.compile(r"\d{4,}")
+
+
+def _redact(text: str) -> str:
+    text = _EMAIL_RE.sub("[redacted-email]", text)
+    return _LONGNUM_RE.sub("[redacted-number]", text)
 
 
 def record_failure(
@@ -46,7 +62,7 @@ def retry_hint(state: CausalGraphState) -> str:
     errors = state.get("errors") or []
     if not errors:
         return ""
-    last = errors[-1][-_MAX_ERROR_CHARS:]
+    last = _redact(errors[-1][-_MAX_ERROR_CHARS:])
     return (
         "\n\nIMPORTANT: your previous attempt FAILED with the error below. "
         "Diagnose it and produce a corrected version that avoids it:\n"

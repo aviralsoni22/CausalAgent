@@ -17,8 +17,13 @@ from datetime import date, timedelta
 import pandas as pd
 from sqlalchemy import text
 
+from app.core import config
 from app.core.db import get_engine
 from app.core.schema_def import DDL
+
+# Tables the read-only analytics role is allowed to SELECT — exactly the three
+# the SQL agent needs, and nothing else.
+_ANALYTICS_TABLES = ("customers", "orders", "marketing_exposures")
 
 N_CUSTOMERS = 3000
 TRUE_DISCOUNT_ATE = 14.0  # USD uplift in total_amount caused by a discount
@@ -86,6 +91,39 @@ def _build_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     )
 
 
+def grant_readonly_role(engine) -> None:
+    """Create/refresh the least-privilege role the SQL agent connects as.
+
+    Idempotent. Granted SELECT on exactly the three analytics tables and nothing
+    else — not the audit (``analysis_runs``) or ingest-state tables, no writes,
+    no superuser functions. Run as an owner/admin connection (the seed engine).
+    """
+    role = config.READONLY_DB_USER
+    if not role.isidentifier():
+        raise ValueError(f"READONLY_DB_USER {role!r} is not a valid SQL identifier.")
+    # DDL can't take bind params; the role name is identifier-validated above and
+    # the password literal is escaped by doubling single quotes.
+    pw_literal = "'" + config.READONLY_DB_PASSWORD.replace("'", "''") + "'"
+
+    with engine.begin() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
+        ).scalar()
+        verb = "ALTER" if exists else "CREATE"
+        conn.execute(text(f'{verb} ROLE "{role}" LOGIN PASSWORD {pw_literal}'))
+        # Reset to a clean slate, then grant only what the extraction query needs.
+        conn.execute(text(f'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "{role}"'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{config.DB_NAME}" TO "{role}"'))
+        conn.execute(text(f'GRANT USAGE ON SCHEMA public TO "{role}"'))
+        for table in _ANALYTICS_TABLES:
+            conn.execute(text(f'GRANT SELECT ON {table} TO "{role}"'))
+
+    print(
+        f"Read-only role {role!r} ready: SELECT on {', '.join(_ANALYTICS_TABLES)} "
+        f"only (no write, no other tables)."
+    )
+
+
 def main() -> None:
     engine = get_engine()
     customers, orders, exposures = _build_frames()
@@ -103,6 +141,9 @@ def main() -> None:
         f"Seeded {len(customers)} customers, {len(orders)} orders, "
         f"{len(exposures)} exposures. True discount ATE = {TRUE_DISCOUNT_ATE} USD."
     )
+
+    # Provision the least-privilege role the SQL agent uses for extraction.
+    grant_readonly_role(engine)
 
 
 if __name__ == "__main__":

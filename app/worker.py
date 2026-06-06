@@ -11,6 +11,7 @@ import logging
 from celery import Celery
 
 from app.core import config
+from app.core.cleanup import purge_extracted_data
 from app.core.graph import compiled_graph, initial_state
 from app.core.observability import configure_tracing, log_causal_run
 from app.core.persistence import save_run
@@ -58,20 +59,26 @@ def run_causal_analysis(
         analysis_spec=analysis_spec,
         window=window,
     )
-    # Recursion limit comfortably covers the bounded retry loops.
-    final_state = compiled_graph.invoke(state, config={"recursion_limit": 50})
-
-    # Best-effort audit trail: never let a persistence problem lose the result.
     try:
-        save_run(final_state)
-    except Exception:
-        logger.exception("Failed to persist provenance for task %s", task_id)
+        # Recursion limit comfortably covers the bounded retry loops.
+        final_state = compiled_graph.invoke(state, config={"recursion_limit": 50})
 
-    # Best-effort experiment tracking, for the same reason: a tracking failure
-    # must not lose the result. No-op unless MLflow is gated on.
-    try:
-        log_causal_run(final_state)
-    except Exception:
-        logger.exception("Failed to log MLflow run for task %s", task_id)
+        # Best-effort audit trail: never let a persistence problem lose the result.
+        try:
+            save_run(final_state)
+        except Exception:
+            logger.exception("Failed to persist provenance for task %s", task_id)
 
-    return dict(final_state)
+        # Best-effort experiment tracking, for the same reason: a tracking failure
+        # must not lose the result. No-op unless MLflow is gated on.
+        try:
+            log_causal_run(final_state)
+        except Exception:
+            logger.exception("Failed to log MLflow run for task %s", task_id)
+
+        return dict(final_state)
+    finally:
+        # Always delete the extracted rows (customer PII) once the run is over,
+        # success or failure — they must not linger on disk. Runs even if the
+        # graph raised, since the path is derived from task_id.
+        purge_extracted_data(task_id)

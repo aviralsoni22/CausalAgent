@@ -179,8 +179,16 @@ def parse_event(value) -> OrderEvent | None:
     """
     try:
         return OrderEvent(**value)
-    except (ValidationError, TypeError) as exc:
-        logger.error("Skipping poison-pill message: %s", exc)
+    except ValidationError as exc:
+        # Log which fields failed and why, never the offending values — a
+        # ValidationError renders the input, which for an order event is
+        # customer PII (id, region, age). Field locations + error types are
+        # enough to debug a poison pill without leaking data into the logs.
+        problems = [(e["loc"], e["type"]) for e in exc.errors()]
+        logger.error("Skipping poison-pill message; invalid fields: %s", problems)
+        return None
+    except TypeError as exc:
+        logger.error("Skipping poison-pill message: %s", type(exc).__name__)
         return None
 
 

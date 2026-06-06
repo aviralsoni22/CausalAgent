@@ -31,6 +31,16 @@ EXEC_TIMEOUT_SECONDS = int(os.environ.get("SANDBOX_EXEC_TIMEOUT", "120"))
 # container. Tune per deployment (the free-tier sandbox runs with little RAM).
 MAX_CSV_BYTES = int(os.environ.get("SANDBOX_MAX_CSV_BYTES", str(25 * 1024 * 1024)))
 
+# The untrusted R subprocess gets a minimal, allow-listed environment rather than
+# a copy of the sandbox's own. A full `dict(os.environ)` would hand any value in
+# the container's environment (a future token, a tracing key) straight to
+# attacker-influenced R via Sys.getenv(); only the variables R legitimately needs
+# to find its toolchain and libraries are forwarded.
+_ENV_ALLOWLIST = (
+    "PATH", "LANG", "LC_ALL", "LD_LIBRARY_PATH",
+    "R_HOME", "R_LIBS", "R_LIBS_USER", "R_LIBS_SITE",
+)
+
 app = FastAPI(title="CausalAgent R Sandbox", version="1.0.0")
 
 
@@ -102,8 +112,13 @@ def execute(req: ExecuteRequest) -> ExecuteResponse:
         script_path = run_dir / "script.R"
         script_path.write_text(req.r_script, encoding="utf-8")
 
-        env = dict(os.environ)
+        env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+        env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
         env["DATA_FILE_PATH"] = str(data_path)
+        # Keep every R-side write (its session tempdir, any dotfiles) inside the
+        # throwaway run dir so a read-only container rootfs is enough.
+        env["HOME"] = str(run_dir)
+        env["TMPDIR"] = str(run_dir)
 
         try:
             proc = subprocess.run(

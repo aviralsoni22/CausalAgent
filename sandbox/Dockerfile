@@ -7,6 +7,8 @@ FROM python:3.12-slim
 # r-base gives us Rscript; build-essential + gfortran let R compile source
 # packages; libblas/liblapack are required to LINK compiled stats packages like
 # MatchIt (without them the build links against -lblas/-llapack and fails).
+# iptables installs the egress lockdown at startup; util-linux provides setpriv,
+# used to drop privileges before launching the API (see entrypoint.sh).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         r-base \
@@ -14,6 +16,8 @@ RUN apt-get update \
         gfortran \
         libblas-dev \
         liblapack-dev \
+        iptables \
+        util-linux \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,10 +33,22 @@ COPY requirements.txt /sandbox/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py /sandbox/main.py
+COPY entrypoint.sh /sandbox/entrypoint.sh
+# Strip any CRLF (the repo may be checked out on Windows) so the shebang is valid,
+# then make it executable.
+RUN sed -i 's/\r$//' /sandbox/entrypoint.sh && chmod +x /sandbox/entrypoint.sh
 
-# Workspace where each request's .R script and CSV are materialised.
-RUN mkdir -p /sandbox/workspace
+# Workspace where each request's .R script and CSV are materialised. At runtime
+# this path is a writable tmpfs (see docker-compose) so the rest of the rootfs
+# can be mounted read-only; mode 1777 lets the unprivileged service user write.
+RUN mkdir -p /sandbox/workspace && chmod 1777 /sandbox/workspace
+
+# Unprivileged account the API actually runs as. The entrypoint starts as root
+# only to install the firewall rule, then drops to this uid via setpriv.
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin sandbox
 
 EXPOSE 8001
 
+# The entrypoint locks down egress and drops privileges, then execs the CMD.
+ENTRYPOINT ["/sandbox/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]

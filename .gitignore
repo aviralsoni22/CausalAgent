@@ -11,16 +11,10 @@ __pycache__/
 # Extracted data artifacts (CSV pulled by the SQL agent)
 data/*.csv
 
-# MLflow local tracking output (Phase 4 observability)
-mlruns/
-mlartifacts/
-mlflow.db
-
 # OS noise
 .DS_Store
 
 # Internal working docs (architecture notes, ADRs) — conveyed via README instead
 docs/
 
-# Internal master prompt — kept local, not for the public repo
 MASTER_PROMPT.md

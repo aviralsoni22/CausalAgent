@@ -17,6 +17,7 @@ import sys
 import uuid
 
 from app.core import config
+from app.core.cleanup import purge_extracted_data
 from app.core.graph import compiled_graph, initial_state
 from app.core.observability import configure_tracing
 
@@ -43,7 +44,11 @@ def main(argv: list[str]) -> int:
     print("Running graph (sql -> r -> execute -> evaluate -> review) ...\n")
 
     state = initial_state(task_id=task_id, user_query=query)
-    final = compiled_graph.invoke(state, config={"recursion_limit": 50})
+    try:
+        final = compiled_graph.invoke(state, config={"recursion_limit": 50})
+    finally:
+        # Don't leave the extracted customer rows on disk after the run.
+        purge_extracted_data(task_id)
 
     print("=" * 70)
     print(f"status          : {final.get('current_status')}")
