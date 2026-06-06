@@ -1,3 +1,23 @@
+# Shared environment for the three app roles (api / worker / consumer). They are
+# the same image with different commands, and all reach the backing services by
+# compose service name (Rule 5 — only env changes between dev and deploy).
+x-app-env: &app-env
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USER: admin
+  DB_PASSWORD: password
+  DB_NAME: enterprise_dw
+  READONLY_DB_USER: causal_ro
+  READONLY_DB_PASSWORD: readonly
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  R_SANDBOX_URL: "http://r_sandbox:8001"
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+  # Pass through from the host env / .env; required by the worker (and api on
+  # the synchronous path). Left empty if unset — the LLM factory fails loudly.
+  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+  ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-claude-sonnet-4-5}"
+
 services:
   redis:
     # Redis is used by Celery as broker and backend for task queueing
@@ -91,12 +111,56 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      # Only to install the OUTPUT-DROP firewall rule at startup.
+      # NET_ADMIN: install the OUTPUT-DROP egress firewall at startup.
+      # SETUID/SETGID: let the entrypoint drop from root to uid 10001 via setpriv
+      # (setresuid + setgroups). These enable the privilege *drop* only — once
+      # dropped, the unprivileged API process holds no effective capabilities.
       - NET_ADMIN
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
     mem_limit: 1g
+
+  # ---- Application roles: one image (root Dockerfile), three commands ----
+  api:
+    # Synchronous ingress: accept a query, enqueue it, return a task_id.
+    build: .
+    image: causalagent-app:latest
+    container_name: causal_api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    # Celery worker: drives the LangGraph pipeline and calls the R sandbox over
+    # the internal network (r_sandbox:8001), so the sandbox needs no host port.
+    build: .
+    image: causalagent-app:latest
+    container_name: causal_worker
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    environment: *app-env
+    depends_on:
+      - postgres
+      - redis
+      - r_sandbox
+
+  consumer:
+    # Event-driven layer: ingest order events and enqueue windowed analyses.
+    build: .
+    image: causalagent-app:latest
+    container_name: causal_consumer
+    command: ["python", "-m", "app.events.consumer"]
+    environment: *app-env
+    depends_on:
+      - postgres
+      - redis
+      - redpanda
 
 volumes:
   # Named volume for durable Postgres storage

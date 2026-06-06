@@ -1,0 +1,22 @@
+# Keep the build context (and image) small and free of host-only cruft.
+.git
+.github
+.venv
+**/__pycache__
+*.pyc
+
+# Local-only working dirs and artifacts
+data/*.csv
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Not needed at runtime (tests run in CI, docs are internal, sandbox has its own image)
+tests/
+docs/
+sandbox/
+.claude/
+
+# Local env / editor
+.env
+.python-version.local

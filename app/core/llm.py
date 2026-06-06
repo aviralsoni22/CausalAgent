@@ -30,4 +30,8 @@ def get_llm() -> ChatAnthropic:
         temperature=0,
         max_tokens=4096,
         timeout=120,
+        # Explicit, not inherited: the SDK retries transient failures (429, 5xx,
+        # timeouts) with exponential backoff. Permanent errors (auth/bad-request)
+        # are not retried here and are caught + failed-fast in feedback.py.
+        max_retries=2,
     )

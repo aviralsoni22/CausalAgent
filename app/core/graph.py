@@ -61,6 +61,12 @@ _FAILURE_GUIDANCE = {
         "The analysis completed but I couldn't write the plain-language summary. "
         "The statistical result is available in the output."
     ),
+    "fatal_llm_error": (
+        "The analysis service is temporarily misconfigured or unavailable (an "
+        "authentication or request error reaching the model). This is not a "
+        "problem with your question — please contact the operator or try again "
+        "later."
+    ),
 }
 
 _FAILURE_GUIDANCE_DEFAULT = (

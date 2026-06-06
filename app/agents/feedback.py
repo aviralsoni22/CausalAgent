@@ -7,10 +7,20 @@ into the prompt, giving the LLM a concrete chance to fix what broke.
 """
 from __future__ import annotations
 
+import logging
 import re
+import sys
 import traceback
 
+from app.core import config
 from app.core.state import CausalGraphState
+
+logger = logging.getLogger(__name__)
+
+# HTTP statuses no amount of regenerating will fix: auth, permission, a malformed
+# request, content-policy refusal. 429 and 5xx are transient — the Anthropic SDK
+# already retries those with backoff — so they are deliberately NOT here.
+_PERMANENT_STATUS = {400, 401, 403, 404, 422}
 
 # Cap so a giant traceback can't blow the prompt budget.
 _MAX_ERROR_CHARS = 2000
@@ -33,6 +43,33 @@ def _redact(text: str) -> str:
     return _LONGNUM_RE.sub("[redacted-number]", text)
 
 
+def _iter_causes(exc: BaseException | None):
+    """Walk the exception's cause/context chain (langchain may wrap the SDK error)."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
+def _is_permanent_llm_error(exc: BaseException) -> bool:
+    """True for errors regenerating can't fix (auth/permission/bad-request/policy).
+
+    Keys off the HTTP status code on the exception (or anything it wraps), so it
+    works whether or not the anthropic exception types are importable.
+    """
+    return any(getattr(e, "status_code", None) in _PERMANENT_STATUS for e in _iter_causes(exc))
+
+
+def _request_id(exc: BaseException) -> str | None:
+    """First Anthropic request id in the chain, for correlating with provider logs."""
+    for e in _iter_causes(exc):
+        rid = getattr(e, "request_id", None)
+        if rid:
+            return rid
+    return None
+
+
 def record_failure(
     state: CausalGraphState,
     node: str,
@@ -48,14 +85,38 @@ def record_failure(
     R exit); otherwise the current traceback is captured.
     """
     detail = error_detail if error_detail is not None else traceback.format_exc()
+    # Only a live exception (error_detail is None) can be classified; sandbox
+    # failures pass error_detail explicitly and are always treated as retryable.
+    exc = sys.exc_info()[1] if error_detail is None else None
     # Redact here, at the point of capture, so every downstream sink (LLM prompt,
     # /status, audit DB) only ever sees the sanitised text.
     redacted = _redact(f"[{node}]\n{detail}")
     retries = state.get("retries") or {}
+    node_count = retries.get(node, 0) + 1
+
+    if exc is not None:
+        request_id = _request_id(exc)
+        if _is_permanent_llm_error(exc):
+            # Regenerating cannot fix a bad key / malformed request / policy
+            # refusal — exhaust this node now so the graph routes straight to the
+            # terminal fallback instead of burning the whole retry budget (and the
+            # quota) on a call that will fail identically every time.
+            node_count = config.MAX_RETRIES
+            status = "fatal_llm_error"
+            logger.error(
+                "Permanent LLM error in %s (request_id=%s): %s — failing fast",
+                node, request_id, type(exc).__name__,
+            )
+        else:
+            logger.warning(
+                "Node %s failed (request_id=%s): %s",
+                node, request_id, type(exc).__name__,
+            )
+
     return {
         "errors": state["errors"] + [redacted],
         "retry_count": state.get("retry_count", 0) + 1,
-        "retries": {**retries, node: retries.get(node, 0) + 1},
+        "retries": {**retries, node: node_count},
         "current_status": status,
     }
 

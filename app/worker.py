@@ -120,6 +120,9 @@ def run_causal_analysis(
                 state="PROGRESS",
                 meta=progress_meta(step.get("current_status", ""), task_id),
             )
+        # stream() always yields at least the final state; guard anyway so a
+        # pathological empty stream degrades to an empty result, not a crash.
+        final_state = final_state or {}
 
         # Best-effort audit trail: never let a persistence problem lose the result.
         try:
