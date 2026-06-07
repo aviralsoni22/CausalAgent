@@ -212,7 +212,7 @@ def sql_agent_node(state: CausalGraphState) -> dict:
         columns = list(df.columns)
         _validate_spec(spec, columns)
 
-        file_path = extracted_csv_path(state["task_id"])
+        file_path = extracted_csv_path(state["task_id"], state["user_query"])
         file_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(file_path, index=False)
 

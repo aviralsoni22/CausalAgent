@@ -54,15 +54,19 @@ class SQLGeneration(BaseModel):
             "over this data looks like. Empty when answerable is true."
         ),
     )
-    sql_query: str = Field(
-        ...,
-        description="A single, read-only SELECT statement against the e-commerce schema.",
+    sql_query: str | None = Field(
+        default=None,
+        description=(
+            "A single, read-only SELECT statement against the e-commerce schema. "
+            "Required when answerable is true; omit (null) when answerable is false."
+        ),
     )
-    spec: AnalysisSpec = Field(
-        ...,
+    spec: AnalysisSpec | None = Field(
+        default=None,
         description=(
             "The causal identification for this query. Every column named here "
-            "(treatment, outcome, confounders) MUST be projected by sql_query."
+            "(treatment, outcome, confounders) MUST be projected by sql_query. "
+            "Required when answerable is true; omit (null) when answerable is false."
         ),
     )
     reasoning: str = Field(
