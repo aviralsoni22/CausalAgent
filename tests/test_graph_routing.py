@@ -90,6 +90,14 @@ def test_budgets_are_per_node():
     assert _after_r(state) == "r_agent"
 
 
+# --- honesty guard: an ill-posed question is declined cleanly --------------
+
+def test_declined_question_ends_without_retry_or_fallback():
+    # The SQL agent set a decline narrative; the graph terminates, it does not
+    # retry the question or treat the decline as a failure.
+    assert _after_sql(_state("declined")) == END
+
+
 # --- a missing retries map is treated as zero failures ---------------------
 
 def test_missing_retries_map_is_safe():

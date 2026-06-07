@@ -10,12 +10,23 @@ import json
 import re
 
 from app.agents.feedback import record_failure
+from app.core.sensitivity import e_value
 from app.core.state import CausalGraphState
 
 _SIGNIFICANCE_THRESHOLD = 0.05
 # Largest acceptable standardised mean difference after matching.
 _BALANCE_THRESHOLD = 0.1
 _JSON_OBJ = re.compile(r"\{.*\}")
+
+
+def _opt_float(value) -> float | None:
+    """Coerce an R-emitted number (or null/missing) to float or None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_json(stdout: str) -> dict:
@@ -63,6 +74,21 @@ def evaluator_node(state: CausalGraphState) -> dict:
             output["balanced"] = (
                 float(max_smd) < _BALANCE_THRESHOLD if max_smd is not None else None
             )
+
+        # Sensitivity to unobserved confounding (E-value), computed here rather
+        # than in the LLM-written R. Needs the SE of the treatment coefficient and
+        # the outcome SD; absent on older scripts, in which case e_value is None.
+        point, ci = e_value(
+            ate, _opt_float(parsed.get("std_error")), _opt_float(parsed.get("outcome_sd"))
+        )
+        if point is not None:
+            output["e_value"] = point
+            output["e_value_ci"] = ci
+
+        # Positivity / common-support overlap of the propensity scores (matched
+        # path only; null for covariate-adjusted/unadjusted lm).
+        if "overlap" in parsed:
+            output["overlap"] = _opt_float(parsed["overlap"])
 
         return {
             "statistical_output": output,

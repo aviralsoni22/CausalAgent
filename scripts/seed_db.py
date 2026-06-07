@@ -20,15 +20,13 @@ from sqlalchemy import text
 from app.core import config
 from app.core.db import get_engine
 from app.core.schema_def import DDL
+from app.sim import effects
 
 # Tables the read-only analytics role is allowed to SELECT — exactly the three
 # the SQL agent needs, and nothing else.
 _ANALYTICS_TABLES = ("customers", "orders", "marketing_exposures")
 
 N_CUSTOMERS = 3000
-TRUE_DISCOUNT_ATE = 14.0  # USD uplift in total_amount caused by a discount
-REGIONS = ["NA", "EU", "APAC", "LATAM"]
-TIERS = ["bronze", "silver", "gold"]
 RNG_SEED = 42
 
 
@@ -37,43 +35,33 @@ def _build_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     base_day = date(2024, 1, 1)
 
     customers, orders, exposures = [], [], []
-    region_effect = {"NA": 10.0, "EU": 6.0, "APAC": 4.0, "LATAM": 0.0}
 
     for cid in range(1, N_CUSTOMERS + 1):
-        age = rng.randint(18, 70)
-        region = rng.choice(REGIONS)
+        # One shared generative model (confounded multi-treatment, planted
+        # effects) so the seeded mart matches the streamed mart exactly.
+        unit = effects.generate_unit(cid, rng)
         customers.append(
             {
-                "customer_id": cid,
+                "customer_id": unit["customer_id"],
                 "signup_date": base_day + timedelta(days=rng.randint(0, 600)),
-                "region": region,
-                "age": age,
-                "loyalty_tier": rng.choice(TIERS),
+                "region": unit["region"],
+                "age": unit["age"],
+                "loyalty_tier": unit["loyalty_tier"],
             }
-        )
-
-        received_discount = 1 if rng.random() < 0.5 else 0
-        discount_pct = round(rng.uniform(5, 25), 2) if received_discount else 0.0
-        # Outcome model: base + true treatment effect + covariate effects + noise.
-        total = (
-            50.0
-            + TRUE_DISCOUNT_ATE * received_discount
-            + 0.4 * age
-            + region_effect[region]
-            + rng.gauss(0, 8)
         )
         orders.append(
             {
-                "order_id": cid,
-                "customer_id": cid,
+                "order_id": unit["order_id"],
+                "customer_id": unit["customer_id"],
                 "order_date": base_day + timedelta(days=rng.randint(0, 600)),
-                "received_discount": received_discount,
-                "discount_pct": discount_pct,
-                "total_amount": round(max(total, 0.0), 2),
-                "num_items": rng.randint(1, 8),
+                "received_discount": unit["received_discount"],
+                "discount_pct": unit["discount_pct"],
+                "ui_variant_b": unit["ui_variant_b"],
+                "saw_banner": unit["saw_banner"],
+                "total_amount": unit["total_amount"],
+                "num_items": unit["num_items"],
             }
         )
-
         exposures.append(
             {
                 "exposure_id": cid,
@@ -137,9 +125,10 @@ def main() -> None:
     orders.to_sql("orders", engine, if_exists="append", index=False)
     exposures.to_sql("marketing_exposures", engine, if_exists="append", index=False)
 
+    planted = ", ".join(f"{k}={v}" for k, v in effects.TRUE_EFFECTS.items())
     print(
         f"Seeded {len(customers)} customers, {len(orders)} orders, "
-        f"{len(exposures)} exposures. True discount ATE = {TRUE_DISCOUNT_ATE} USD."
+        f"{len(exposures)} exposures. Planted ATEs (USD): {planted}."
     )
 
     # Provision the least-privilege role the SQL agent uses for extraction.

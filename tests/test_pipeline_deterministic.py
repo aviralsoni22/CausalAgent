@@ -48,28 +48,35 @@ df$region <- factor(df$region)
 model <- lm(total_amount ~ received_discount + age + region, data = df)
 co <- summary(model)$coefficients
 row <- co["received_discount", ]
-cat(sprintf('{"p_value": %.10f, "ate": %.10f, "method": "%s", "n_used": %d}',
-            row["Pr(>|t|)"], row["Estimate"], "covariate_adjusted_lm", nrow(df)),
+osd <- sd(df$total_amount, na.rm = TRUE)
+cat(sprintf('{"p_value": %.10f, "ate": %.10f, "std_error": %.10f, "outcome_sd": %.10f, "method": "%s", "n_used": %d}',
+            row["Pr(>|t|)"], row["Estimate"], row["Std. Error"], osd, "covariate_adjusted_lm", nrow(df)),
     "\n", sep = "")
 """
 
-# Hand-written, known-correct R for the MatchIt propensity-score path. Uses the
-# numeric covariate only to keep matching well-behaved.
+# Hand-written, known-correct R for the MatchIt propensity-score path. Treatment
+# is confounded by age (older customers are likelier to be discounted), so a
+# caliper is needed to enforce post-match balance — naive nearest matching on a
+# strong confounder leaves residual imbalance the gate would (correctly) flag.
 _R_MATCHIT = r"""
 library(MatchIt)
 data_path <- Sys.getenv("DATA_FILE_PATH")
 df <- read.csv(data_path, stringsAsFactors = FALSE, na.strings = "")
 df <- na.omit(df[, c("total_amount", "received_discount", "age")])
 df$received_discount <- as.integer(df$received_discount)
-m <- matchit(received_discount ~ age, data = df, method = "nearest")
+m <- matchit(received_discount ~ age, data = df, method = "nearest", caliper = 0.1)
 md <- match.data(m)
 model <- lm(total_amount ~ received_discount + age, data = md)
 co <- summary(model)$coefficients
 row <- co["received_discount", ]
 s <- summary(m)$sum.matched
 max_smd <- max(abs(s[, "Std. Mean Diff."]), na.rm = TRUE)
-cat(sprintf('{"p_value": %.10f, "ate": %.10f, "method": "%s", "n_used": %d, "max_smd": %.6f}',
-            row["Pr(>|t|)"], row["Estimate"], "psm_matchit_lm", nrow(md), max_smd),
+osd <- sd(df$total_amount, na.rm = TRUE)
+ps <- m$distance; tr <- df$received_discount == 1
+lo <- max(min(ps[tr]), min(ps[!tr])); hi <- min(max(ps[tr]), max(ps[!tr]))
+overlap <- mean(ps >= lo & ps <= hi)
+cat(sprintf('{"p_value": %.10f, "ate": %.10f, "std_error": %.10f, "outcome_sd": %.10f, "method": "%s", "n_used": %d, "max_smd": %.6f, "overlap": %.6f}',
+            row["Pr(>|t|)"], row["Estimate"], row["Std. Error"], osd, "psm_matchit_lm", nrow(md), max_smd, overlap),
     "\n", sep = "")
 """
 
@@ -123,6 +130,8 @@ def test_covariate_adjusted_recovers_true_ate(seeded_csv):
     assert stats["n_used"] == 3000
     assert abs(stats["ate"] - TRUE_ATE) < ATE_TOLERANCE, stats
     assert stats["p_value"] < 0.05 and stats["is_significant"] is True, stats
+    # Sensitivity flows through: a real effect yields an E-value above 1.
+    assert stats["e_value"] > 1.0 and stats["e_value_ci"] > 1.0, stats
 
 
 def test_matchit_recovers_true_ate(seeded_csv):
@@ -132,6 +141,10 @@ def test_matchit_recovers_true_ate(seeded_csv):
     assert stats["method"] == "psm_matchit_lm"
     assert abs(stats["ate"] - TRUE_ATE) < ATE_TOLERANCE, stats
     assert stats["p_value"] < 0.05 and stats["is_significant"] is True, stats
-    # Balance must be reported and good (treatment is randomized on age).
+    # With caliper matching, balance must be reported and good even though
+    # treatment is confounded by age (older -> likelier discounted).
     assert stats["max_smd"] is not None and stats["max_smd"] < 0.1, stats
     assert stats["balanced"] is True, stats
+    # Positivity + sensitivity reported on the matched path.
+    assert stats["overlap"] is not None and 0.0 <= stats["overlap"] <= 1.0, stats
+    assert stats["e_value"] > 1.0, stats

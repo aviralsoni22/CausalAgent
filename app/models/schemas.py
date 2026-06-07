@@ -36,6 +36,24 @@ class AnalysisSpec(BaseModel):
 class SQLGeneration(BaseModel):
     """What the SQL agent must return."""
 
+    answerable: bool = Field(
+        default=True,
+        description=(
+            "False if the question is NOT a well-posed causal question answerable "
+            "over this schema — e.g. it names no identifiable binary treatment and "
+            "numeric outcome, is unrelated to the data, or is an instruction to do "
+            "something other than analyse. When false, set decline_reason and the "
+            "sql_query/spec are ignored."
+        ),
+    )
+    decline_reason: str = Field(
+        default="",
+        description=(
+            "When answerable is false, a brief, friendly explanation for the user "
+            "of why the question can't be analysed and what a good causal question "
+            "over this data looks like. Empty when answerable is true."
+        ),
+    )
     sql_query: str = Field(
         ...,
         description="A single, read-only SELECT statement against the e-commerce schema.",
@@ -63,8 +81,11 @@ class RScriptGeneration(BaseModel):
             "the DATA_FILE_PATH environment variable, handles NA values, "
             "adjusts for confounders (MatchIt propensity-score matching for a "
             "binary treatment, else covariate-adjusted lm), and prints exactly "
-            'one JSON object to stdout with keys "p_value", "ate", "method", '
-            '"n_used", and "max_smd" (post-match balance, null when not matched).'
+            'one JSON object to stdout with keys "p_value", "ate", "std_error" '
+            '(SE of the treatment coefficient), "outcome_sd" (full-data SD of the '
+            'outcome), "method", "n_used", "max_smd" (post-match balance, null when '
+            'not matched), and "overlap" (propensity common-support fraction, null '
+            "when not matched)."
         ),
     )
 

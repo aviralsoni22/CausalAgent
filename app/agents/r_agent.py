@@ -52,6 +52,11 @@ Contract (follow exactly):
          # Post-match balance: largest |std. mean diff| across covariates.
          s <- summary(m)$sum.matched
          max_smd <- max(abs(s[, "Std. Mean Diff."]), na.rm = TRUE)
+         # Positivity: fraction of units whose propensity (m$distance) lies in the
+         # range shared by both arms (common support). 1.0 = full overlap.
+         ps <- m$distance; tr <- df[[TREATMENT]] == 1
+         lo <- max(min(ps[tr]), min(ps[!tr])); hi <- min(max(ps[tr]), max(ps[!tr]))
+         overlap <- mean(ps >= lo & ps <= hi)
          method <- "psm_matchit_lm"; n_used <- nrow(md)
      BALANCE GATE — a matched estimate is only trustworthy if the match
      actually balanced the covariates. If max_smd >= 0.1 (poor balance), DO
@@ -60,23 +65,27 @@ Contract (follow exactly):
          if (!is.na(max_smd) && max_smd >= 0.1) {
              model <- lm(as.formula(paste(OUTCOME, "~", TREATMENT, "+",
                          paste(CONFOUNDERS, collapse=" + "))), data = df)
-             method <- "covariate_adjusted_lm"; n_used <- nrow(df); max_smd <- NA
+             method <- "covariate_adjusted_lm"; n_used <- nrow(df)
+             max_smd <- NA; overlap <- NA
          }
      On any matching error, fall back in the error handler to a covariate-
      adjusted model on the full data:
          model <- lm(<OUTCOME ~ TREATMENT + CONFOUNDERS>, data = df)
-         method <- "covariate_adjusted_lm"; n_used <- nrow(df); max_smd <- NA
+         method <- "covariate_adjusted_lm"; n_used <- nrow(df)
+         max_smd <- NA; overlap <- NA
    - If there are NO confounders: model <- lm(OUTCOME ~ TREATMENT, data = df);
-     method <- "unadjusted_lm"; n_used <- nrow(df); max_smd <- NA.
+     method <- "unadjusted_lm"; n_used <- nrow(df); max_smd <- NA; overlap <- NA.
 
 4. From summary(model)$coefficients pull the TREATMENT row (stop() if absent).
-   ate = its Estimate; p_value = its Pr(>|t|).
+   ate = its Estimate; p_value = its Pr(>|t|); std_error = its "Std. Error".
+   Also compute the full-data outcome SD: outcome_sd <- sd(df[[OUTCOME]], na.rm = TRUE).
 
 5. Print EXACTLY ONE line to stdout and nothing else on it, via sprintf. When
-   max_smd is NA print null, otherwise the number:
+   max_smd or overlap is NA print null, otherwise the number:
        smd_str <- if (is.na(max_smd)) "null" else sprintf("%.6f", max_smd)
-       cat(sprintf('{"p_value": %.10f, "ate": %.10f, "method": "%s", "n_used": %d, "max_smd": %s}',
-                   p_value, ate, method, n_used, smd_str), "\n", sep="")
+       ov_str  <- if (is.na(overlap)) "null" else sprintf("%.6f", overlap)
+       cat(sprintf('{"p_value": %.10f, "ate": %.10f, "std_error": %.10f, "outcome_sd": %.10f, "method": "%s", "n_used": %d, "max_smd": %s, "overlap": %s}',
+                   p_value, ate, std_error, outcome_sd, method, n_used, smd_str, ov_str), "\n", sep="")
    Print no other text/headers/summaries to stdout.
 
 You MAY use library(MatchIt) (it is installed). Return just the script text.

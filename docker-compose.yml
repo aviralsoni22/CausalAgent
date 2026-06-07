@@ -13,6 +13,8 @@ x-app-env: &app-env
   REDIS_PORT: "6379"
   R_SANDBOX_URL: "http://r_sandbox:8001"
   KAFKA_BOOTSTRAP_SERVERS: redpanda:29092
+  # Local demo stack: expose the fake-storefront /sim routes (off by default in code).
+  ENABLE_SIM_ROUTES: "1"
   # Pass through from the host env / .env; required by the worker (and api on
   # the synchronous path). Left empty if unset — the LLM factory fails loudly.
   ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"

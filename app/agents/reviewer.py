@@ -35,6 +35,15 @@ warn that the treatment and control groups remain imbalanced on the measured \
 covariates, so this estimate is unreliable and should be treated with caution. \
 If balanced is true, you may note the groups were well matched on observed \
 covariates.
+- SENSITIVITY (E-value): if an E-value is provided, state in plain terms how \
+robust the finding is to unobserved confounding: an unmeasured confounder would \
+need to be associated with BOTH the treatment and the outcome by a risk ratio of \
+about that value (beyond the covariates already adjusted) to fully explain the \
+estimate. Use the CI-bound E-value when given; a value at or near 1 means even a \
+weak unmeasured confounder could overturn the result, so say it is not robust.
+- POSITIVITY: if an overlap (common-support) fraction is provided and is low \
+(below ~0.8), warn that treated and control units have limited comparable support, \
+which weakens the comparison.
 - Open by restating, in plain words, HOW the question was interpreted (the \
 provided interpretation line) so the reader can confirm we answered what they \
 asked. Do not contradict it.
@@ -77,7 +86,10 @@ def reviewer_node(state: CausalGraphState) -> dict:
             f"- estimation method: {stats.get('method', 'unknown')}\n"
             f"- sample size used: {stats.get('n_used', 'unknown')}\n"
             f"- max standardised mean diff (balance): {stats.get('max_smd', 'n/a')}\n"
-            f"- balanced (smd < 0.1): {stats.get('balanced', 'n/a')}"
+            f"- balanced (smd < 0.1): {stats.get('balanced', 'n/a')}\n"
+            f"- E-value (point): {stats.get('e_value', 'n/a')}\n"
+            f"- E-value (CI bound nearest null): {stats.get('e_value_ci', 'n/a')}\n"
+            f"- propensity overlap / positivity: {stats.get('overlap', 'n/a')}"
         )
         llm = get_llm().with_structured_output(BusinessNarrative)
         result: BusinessNarrative = llm.invoke(

@@ -14,10 +14,18 @@ from celery.result import AsyncResult
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from app.core import config
 from app.models.schemas import AnalysisSpec
 from app.worker import celery_app, run_causal_analysis
 
 app = FastAPI(title="CausalAgent Ingress", version="1.0.0")
+# Fake-storefront demo surface (/sim/emit, /sim/truth, /sim/). Unauthenticated and
+# state-changing, so it is mounted only when explicitly enabled — never in an
+# exposed deployment unless intended.
+if config.ENABLE_SIM_ROUTES:
+    from app.sim.routes import router as sim_router
+
+    app.include_router(sim_router)
 
 
 class AnalyzeRequest(BaseModel):

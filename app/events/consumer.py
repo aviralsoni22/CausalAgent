@@ -80,16 +80,17 @@ _INGEST_INIT = (
 _INSERT_CUSTOMER = text(
     """
     INSERT INTO customers (customer_id, signup_date, region, age, loyalty_tier)
-    VALUES (:customer_id, NULL, :region, :age, NULL)
+    VALUES (:customer_id, NULL, :region, :age, :loyalty_tier)
     ON CONFLICT (customer_id) DO NOTHING
     """
 )
 _INSERT_ORDER = text(
     """
     INSERT INTO orders (order_id, customer_id, order_date, received_discount,
-                        discount_pct, total_amount, num_items)
+                        discount_pct, ui_variant_b, saw_banner, total_amount,
+                        num_items)
     VALUES (:order_id, :customer_id, :order_date, :received_discount,
-            :discount_pct, :total_amount, :num_items)
+            :discount_pct, :ui_variant_b, :saw_banner, :total_amount, :num_items)
     ON CONFLICT (order_id) DO NOTHING
     RETURNING order_id
     """
@@ -126,7 +127,12 @@ def ingest_event(conn, event: OrderEvent, threshold: int) -> dict | None:
     # Customer first so the order's foreign key is satisfied; both idempotent.
     conn.execute(
         _INSERT_CUSTOMER,
-        {"customer_id": event.customer_id, "region": event.region, "age": event.age},
+        {
+            "customer_id": event.customer_id,
+            "region": event.region,
+            "age": event.age,
+            "loyalty_tier": event.loyalty_tier,
+        },
     )
     inserted = conn.execute(
         _INSERT_ORDER,
@@ -136,6 +142,8 @@ def ingest_event(conn, event: OrderEvent, threshold: int) -> dict | None:
             "order_date": event.order_date,
             "received_discount": event.received_discount,
             "discount_pct": event.discount_pct,
+            "ui_variant_b": event.ui_variant_b,
+            "saw_banner": event.saw_banner,
             "total_amount": event.total_amount,
             "num_items": event.num_items,
         },

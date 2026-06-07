@@ -106,6 +106,10 @@ def _exhausted(state: CausalGraphState, node: str) -> bool:
 def _after_sql(state: CausalGraphState) -> str:
     if state["current_status"] == "sql_done":
         return "r_agent"
+    # Honesty guard: an ill-posed question is declined cleanly (narrative already
+    # set), not retried or treated as a failure.
+    if state["current_status"] == "declined":
+        return END
     return "fallback" if _exhausted(state, "sql_agent") else "sql_agent"
 
 
@@ -154,7 +158,9 @@ def build_graph():
     builder.set_entry_point("sql_agent")
 
     builder.add_conditional_edges(
-        "sql_agent", _after_sql, {"r_agent": "r_agent", "sql_agent": "sql_agent", "fallback": "fallback"}
+        "sql_agent",
+        _after_sql,
+        {"r_agent": "r_agent", "sql_agent": "sql_agent", "fallback": "fallback", END: END},
     )
     builder.add_conditional_edges(
         "r_agent", _after_r, {"executor": "executor", "r_agent": "r_agent", "fallback": "fallback"}

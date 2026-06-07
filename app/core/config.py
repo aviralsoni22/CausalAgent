@@ -160,6 +160,26 @@ KAFKA_SASL_USERNAME: str = os.environ.get("KAFKA_SASL_USERNAME", "")
 KAFKA_SASL_PASSWORD: str = os.environ.get("KAFKA_SASL_PASSWORD", "")
 
 
+# --- Discord demo adapter -------------------------------------------------
+# The bot is a thin client over the HTTP ingress: it calls API_BASE_URL and
+# never imports the worker. Token is required only to run the bot process; the
+# rest of the app does not need it. GUILD_ID (optional) registers the slash
+# command to one server instantly instead of waiting ~1h for global propagation.
+# The /sim demo routes publish synthetic events and grow the mart, unauthenticated
+# — fine for a local demo, not for an exposed deployment. Off by default; the
+# compose stack turns it on explicitly (secure-by-default).
+ENABLE_SIM_ROUTES: bool = os.environ.get("ENABLE_SIM_ROUTES", "").lower() in (
+    "1", "true", "yes",
+)
+DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_BOT_TOKEN", "")
+DISCORD_GUILD_ID: str = os.environ.get("DISCORD_GUILD_ID", "")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "http://localhost:8000")
+# How long the bot waits for an analysis before giving up (s). Slightly above the
+# worker's task_time_limit (660s) so the bot doesn't time out before the task.
+BOT_POLL_TIMEOUT_S: int = int(os.environ.get("BOT_POLL_TIMEOUT_S", "720"))
+BOT_POLL_INTERVAL_S: float = float(os.environ.get("BOT_POLL_INTERVAL_S", "2.0"))
+
+
 def kafka_client_kwargs() -> dict:
     """Connection kwargs shared by the producer and consumer.
 

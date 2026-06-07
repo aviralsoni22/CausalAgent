@@ -26,6 +26,8 @@ orders(
     order_date       DATE,
     received_discount INTEGER,        -- treatment flag: 1 if a discount was applied, else 0
     discount_pct     NUMERIC,         -- percentage discount applied (0 when received_discount = 0)
+    ui_variant_b     INTEGER,         -- treatment flag: 1 if the order used checkout UI variant B, else 0
+    saw_banner       INTEGER,         -- treatment flag: 1 if a free-shipping banner was shown, else 0
     total_amount     NUMERIC,         -- final order value in USD (the typical outcome variable)
     num_items        INTEGER
 )
@@ -61,6 +63,8 @@ DDL = [
         order_date        DATE,
         received_discount INTEGER,
         discount_pct      NUMERIC,
+        ui_variant_b      INTEGER,
+        saw_banner        INTEGER,
         total_amount      NUMERIC,
         num_items         INTEGER
     );
