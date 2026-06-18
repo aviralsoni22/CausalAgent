@@ -8,24 +8,40 @@ stay fast and the heavy LLM + R work happens off the request path.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
 from celery.result import AsyncResult
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
 
 from app.core import config
+from app.core.security import rate_limit, require_api_key
 from app.models.schemas import AnalysisSpec
 from app.worker import celery_app, run_causal_analysis
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="CausalAgent Ingress", version="1.0.0")
-# Fake-storefront demo surface (/sim/emit, /sim/truth, /sim/). Unauthenticated and
-# state-changing, so it is mounted only when explicitly enabled — never in an
-# exposed deployment unless intended.
+
+# The analysis endpoints carry both guards: authenticate first, then rate-limit
+# (a rejected caller shouldn't consume budget). /health stays open for probes.
+_GUARDED = [Depends(require_api_key), Depends(rate_limit)]
+
+if not config.INGRESS_API_KEYS:
+    logger.warning(
+        "Ingress is running WITHOUT API-key auth (INGRESS_API_KEYS is empty). "
+        "Fine for local dev; set INGRESS_API_KEYS before exposing this service."
+    )
+
+# Fake-storefront demo surface (/sim/emit, /sim/truth, /sim/). State-changing and
+# meant for keyless local browser use, so it is mounted only when explicitly
+# enabled — never in an exposed deployment. It still gets rate-limiting (but not
+# the API key, which would break its own storefront page).
 if config.ENABLE_SIM_ROUTES:
     from app.sim.routes import router as sim_router
 
-    app.include_router(sim_router)
+    app.include_router(sim_router, dependencies=[Depends(rate_limit)])
 
 
 class AnalyzeRequest(BaseModel):
@@ -59,7 +75,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze", response_model=AnalyzeResponse, dependencies=_GUARDED)
 def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     task_id = uuid.uuid4().hex
     spec = req.spec.model_dump() if req.spec else None
@@ -69,7 +85,7 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     return AnalyzeResponse(task_id=task_id, status="queued")
 
 
-@app.get("/status/{task_id}", response_model=StatusResponse)
+@app.get("/status/{task_id}", response_model=StatusResponse, dependencies=_GUARDED)
 def status(task_id: str) -> StatusResponse:
     async_result = AsyncResult(task_id, app=celery_app)
     result = async_result.result if async_result.successful() else None

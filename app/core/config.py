@@ -140,6 +140,21 @@ DATA_DIR: str = os.environ.get("DATA_DIR", "data")
 MAX_RETRIES: int = int(os.environ.get("MAX_RETRIES", "3"))
 
 
+# --- Ingress auth + rate limiting -----------------------------------------
+# The FastAPI front door is the only untrusted-network surface (see
+# app/core/security.py). INGRESS_API_KEYS is the set of accepted X-API-Key
+# values; leave it empty for open local dev (the ingress logs a warning), set it
+# to lock down any exposed deployment. INGRESS_API_KEY is the single key the
+# client side — the Discord bot and eval scripts — presents on each call.
+INGRESS_API_KEYS: set[str] = {
+    k.strip() for k in os.environ.get("INGRESS_API_KEYS", "").split(",") if k.strip()
+}
+INGRESS_API_KEY: str = os.environ.get("INGRESS_API_KEY", "")
+# Per-caller request budget (keyed by API key, else client IP). <=0 disables.
+RATE_LIMIT_REQUESTS: int = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
+RATE_LIMIT_WINDOW_S: int = int(os.environ.get("RATE_LIMIT_WINDOW_S", "60"))
+
+
 # --- Kafka / event-driven layer (Phase 3) ---------------------------------
 # Local dev points at the Redpanda container's external listener. In deployment
 # this becomes the managed-Kafka bootstrap server and the SASL/TLS settings

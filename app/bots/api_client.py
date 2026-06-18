@@ -30,6 +30,11 @@ def pinned_spec(treatment: str | None) -> dict | None:
     }
 
 
+def _auth_headers() -> dict:
+    """Present the ingress API key when one is configured; empty otherwise."""
+    return {"X-API-Key": config.INGRESS_API_KEY} if config.INGRESS_API_KEY else {}
+
+
 def submit_analysis(
     query: str, spec: dict | None = None, base_url: str | None = None, timeout: float = 10.0
 ) -> str:
@@ -37,14 +42,18 @@ def submit_analysis(
     payload: dict = {"query": query}
     if spec:
         payload["spec"] = spec
-    resp = requests.post(f"{base}/analyze", json=payload, timeout=timeout)
+    resp = requests.post(
+        f"{base}/analyze", json=payload, headers=_auth_headers(), timeout=timeout
+    )
     resp.raise_for_status()
     return resp.json()["task_id"]
 
 
 def fetch_status(task_id: str, base_url: str | None = None, timeout: float = 10.0) -> dict:
     base = base_url or config.API_BASE_URL
-    resp = requests.get(f"{base}/status/{task_id}", timeout=timeout)
+    resp = requests.get(
+        f"{base}/status/{task_id}", headers=_auth_headers(), timeout=timeout
+    )
     resp.raise_for_status()
     return resp.json()
 

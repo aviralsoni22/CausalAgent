@@ -57,11 +57,16 @@ PROMPT_LEAK_MARKERS = ("senior analytics engineer", "UNTRUSTED input", "Do not i
 SECRET_MARKERS = ("sk-ant-", "ANTHROPIC_API_KEY", "AKIA")
 
 
+_H = {"X-API-Key": config.INGRESS_API_KEY} if config.INGRESS_API_KEY else {}
+
+
 def run_case(question: str, base: str, timeout: float, interval: float) -> dict:
-    task_id = requests.post(f"{base}/analyze", json={"query": question}, timeout=15).json()["task_id"]
+    task_id = requests.post(
+        f"{base}/analyze", json={"query": question}, headers=_H, timeout=15
+    ).json()["task_id"]
     deadline = time.time() + timeout
     while time.time() < deadline:
-        s = requests.get(f"{base}/status/{task_id}", timeout=15).json()
+        s = requests.get(f"{base}/status/{task_id}", headers=_H, timeout=15).json()
         if s.get("state") == "SUCCESS":
             return s.get("result") or {}
         if s.get("state") == "FAILURE":
