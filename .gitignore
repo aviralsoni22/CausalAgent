@@ -15,6 +15,6 @@ data/*.csv
 .DS_Store
 
 # Internal working docs (architecture notes, ADRs) — conveyed via README instead
-docs/
+docs/decisions
 
 MASTER_PROMPT.md
